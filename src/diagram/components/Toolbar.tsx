@@ -16,7 +16,7 @@
 
 import React from 'react';
 import styled from 'styled-components';
-import { useDiagram } from '../context/DiagramProvider';
+import { useDiagram, DiagramType } from '../context/DiagramProvider';
 
 // ============================================================
 // STYLED COMPONENTS
@@ -92,26 +92,71 @@ const Divider = styled.div`
   margin: 0 4px;
 `;
 
+const SelectType = styled.select`
+  appearance: none;
+  background: ${({ theme }) => theme.colors.bg.elevated};
+  border: 1px solid ${({ theme }) => theme.colors.border.default};
+  color: ${({ theme }) => theme.colors.text.primary};
+  border-radius: ${({ theme }) => theme.radius.md};
+  padding: 4px 28px 4px 12px;
+  font-size: ${({ theme }) => theme.typography.sizes.sm};
+  font-family: ${({ theme }) => theme.typography.fontFamily};
+  cursor: pointer;
+  outline: none;
+  transition: all ${({ theme }) => theme.transitions.fast};
+
+  /* Custom dropdown arrow */
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 14px;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.accent.primary};
+  }
+
+  &:focus {
+    border-color: ${({ theme }) => theme.colors.accent.primary};
+    box-shadow: 0 0 0 2px ${({ theme }) => theme.colors.accent.primary}33;
+  }
+`;
+
 // ============================================================
 // COMPONENT
 // ============================================================
 
 export default function Toolbar() {
-  const { paper, canUndo, canRedo, undo, redo, deleteSelected, selectAll, selectedCells } =
-    useDiagram();
+  const { 
+    paper, canUndo, canRedo, undo, redo, deleteSelected, selectAll, selectedCells,
+    diagramType, setDiagramType
+  } = useDiagram();
 
   const handleZoomIn = () => {
     if (!paper) return;
-    const scale = paper.scale().sx;
-    const newScale = Math.min(3, scale + 0.15);
-    paper.scale(newScale, newScale);
+    const currentScale = paper.scale().sx;
+    const newScale = Math.min(3, currentScale + 0.15);
+    zoomToCenter(paper, newScale);
   };
 
   const handleZoomOut = () => {
     if (!paper) return;
-    const scale = paper.scale().sx;
-    const newScale = Math.max(0.1, scale - 0.15);
-    paper.scale(newScale, newScale);
+    const currentScale = paper.scale().sx;
+    const newScale = Math.max(0.1, currentScale - 0.15);
+    zoomToCenter(paper, newScale);
+  };
+
+  /** Zoom keeping the viewport center fixed */
+  const zoomToCenter = (p: NonNullable<typeof paper>, newScale: number) => {
+    const elRect = (p.el as HTMLElement).getBoundingClientRect();
+    const cx = elRect.width / 2;
+    const cy = elRect.height / 2;
+    const currentScale = p.scale().sx;
+    const currentTranslate = p.translate();
+    const factor = newScale / currentScale;
+    const newTx = cx - factor * (cx - currentTranslate.tx);
+    const newTy = cy - factor * (cy - currentTranslate.ty);
+    p.scale(newScale, newScale);
+    p.translate(newTx, newTy);
   };
 
   const handleFitContent = () => {
@@ -125,6 +170,20 @@ export default function Toolbar() {
 
   return (
     <ToolbarContainer>
+      <SelectType 
+        value={diagramType} 
+        onChange={(e) => setDiagramType(e.target.value as DiagramType)}
+        data-tooltip="Diagram Type"
+      >
+        <option value="BPMN">BPMN Diagram</option>
+        <option value="Business Object">Business Object</option>
+        <option value="Organization">Organization</option>
+        <option value="System">System Diagram</option>
+        <option value="Technical Workflow">Technical Workflow</option>
+      </SelectType>
+
+      <Divider />
+
       {/* Undo/Redo */}
       <ToolButton onClick={undo} $disabled={!canUndo} data-tooltip="Undo (⌘Z)">
         ↩

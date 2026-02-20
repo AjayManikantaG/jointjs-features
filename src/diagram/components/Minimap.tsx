@@ -1,68 +1,62 @@
 /**
- * Minimap.tsx
+ * Navigator.tsx
  * 
- * Bird-view navigator showing a scaled-down view of the entire graph.
- * 
- * How it works:
- * 1. Renders a small <div> container
- * 2. Creates a second dia.Paper (read-only) sharing the same graph
- * 3. Draws a viewport indicator showing the current visible area
- * 4. Clicking on the minimap pans the main paper to that position
- * 
- * Performance:
- * - The minimap paper is frozen and only updated on graph changes
- * - Uses requestAnimationFrame for smooth viewport updates
+ * Replicates the JointJS+ Navigator widget.
+ * Displays a small overview of the entire diagram with a draggable viewport
+ * representing the current viewing area of the main paper.
  */
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import styled from 'styled-components';
-import { dia, shapes } from '@joint/core';
+import { dia } from '@joint/core';
 import { useDiagram } from '../context/DiagramProvider';
+import { createPaper } from '../engine/createPaper';
 
 // ============================================================
 // STYLED COMPONENTS
 // ============================================================
 
-const MinimapContainer = styled.div`
-  width: 200px;
-  height: 150px;
-  background: ${({ theme }) => theme.colors.bg.secondary};
+const NavigatorContainer = styled.div`
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 240px;
+  height: 160px;
+  background: ${({ theme }) => theme.colors.bg.elevated};
   border: ${({ theme }) => theme.glass.border};
-  border-radius: ${({ theme }) => theme.radius.lg};
+  border-radius: ${({ theme }) => theme.radius.md};
+  box-shadow: ${({ theme }) => theme.shadows.lg};
   overflow: hidden;
-  position: relative;
-  box-shadow: ${({ theme }) => theme.shadows.md};
-  cursor: pointer;
-  z-index: ${({ theme }) => theme.zIndex.panels};
-  backdrop-filter: ${({ theme }) => theme.glass.backdropFilter};
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 `;
 
-const MinimapPaperEl = styled.div`
+const PaperWrapper = styled.div`
   width: 100%;
   height: 100%;
-  pointer-events: none;
-  opacity: 0.6;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* Let the viewport handle panning */
+  opacity: 0.7;
 `;
 
-const ViewportIndicator = styled.div`
+const ViewportBox = styled.div`
   position: absolute;
   border: 2px solid ${({ theme }) => theme.colors.accent.primary};
-  background: rgba(123, 97, 255, 0.08);
-  border-radius: 2px;
-  pointer-events: none;
-  transition: all 0.1s ease;
-`;
+  background: rgba(123, 97, 255, 0.1);
+  box-sizing: border-box;
+  cursor: grab;
+  z-index: 21;
+  transition: opacity 0.2s ease;
 
-const MinimapLabel = styled.div`
-  position: absolute;
-  top: 4px;
-  left: 8px;
-  font-size: ${({ theme }) => theme.typography.sizes.xs};
-  color: ${({ theme }) => theme.colors.text.tertiary};
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  pointer-events: none;
+  &:active {
+    cursor: grabbing;
+    background: rgba(123, 97, 255, 0.2);
+  }
 `;
 
 // ============================================================
@@ -72,137 +66,178 @@ const MinimapLabel = styled.div`
 export default function Minimap() {
   const { graph, paper } = useDiagram();
   const containerRef = useRef<HTMLDivElement>(null);
-  const paperElRef = useRef<HTMLDivElement>(null);
-  const minimapPaperRef = useRef<dia.Paper | null>(null);
-  const [viewport, setViewport] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  
+  // State for the viewport overlay box
+  const [viewportStyle, setViewportStyle] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const initialTranslateRef = useRef({ tx: 0, ty: 0 });
 
-  // Create minimap paper
-  useEffect(() => {
-    const el = paperElRef.current;
-    if (!el) return;
+  // Store the secondary paper instance
+  const navPaperRef = useRef<dia.Paper | null>(null);
 
-    const minimapPaper = new dia.Paper({
-      el,
-      model: graph,
-      width: 200,
-      height: 150,
-      gridSize: 1,
-      interactive: false,
-      async: false,
-      cellViewNamespace: shapes,
-      background: { color: 'transparent' },
-    });
-
-    // Scale to fit
-    minimapPaper.scaleContentToFit({
-      padding: 10,
-      maxScale: 0.15,
-      minScale: 0.02,
-    });
-
-    minimapPaperRef.current = minimapPaper;
-
-    // Update scale when graph changes
-    const onGraphChange = () => {
-      requestAnimationFrame(() => {
-        minimapPaper.scaleContentToFit({
-          padding: 10,
-          maxScale: 0.15,
-          minScale: 0.02,
-        });
-      });
-    };
-    graph.on('add', onGraphChange);
-    graph.on('remove', onGraphChange);
-    graph.on('change:position', onGraphChange);
-    graph.on('change:size', onGraphChange);
-
-    return () => {
-      graph.off('add', onGraphChange);
-      graph.off('remove', onGraphChange);
-      graph.off('change:position', onGraphChange);
-      graph.off('change:size', onGraphChange);
-      minimapPaper.remove();
-    };
+  // Sync the secondary paper scale to fit all contents
+  const syncNavPaperScale = useCallback(() => {
+    const navPaper = navPaperRef.current;
+    if (!navPaper || !graph.getElements().length) return;
+    
+    // Scale the overview paper to fit the whole graph
+    navPaper.scaleContentToFit({ padding: 10 });
   }, [graph]);
 
-  // Update viewport indicator when main paper changes
-  useEffect(() => {
-    if (!paper || !minimapPaperRef.current) return;
+  // Sync the viewport box to exactly match what the main paper shows
+  const syncViewportToMainPaper = useCallback(() => {
+    if (!paper || !navPaperRef.current || !containerRef.current) return;
+    
+    const mainEl = paper.el as HTMLElement;
+    const navEl = containerRef.current;
+    const navPaper = navPaperRef.current;
 
-    const updateViewport = () => {
-      const mainPaper = paper;
-      const miniPaper = minimapPaperRef.current;
-      if (!mainPaper || !miniPaper) return;
+    // Viewport dimensions in window pixels
+    const mainWidth = mainEl.clientWidth;
+    const mainHeight = mainEl.clientHeight;
+    
+    // Main paper transform
+    const mainScale = paper.scale().sx;
+    const mainTranslate = paper.translate();
+    
+    // Nav paper transform
+    const navScale = navPaper.scale().sx;
+    const navTranslate = navPaper.translate();
 
-      const mainScale = mainPaper.scale();
-      const mainTranslate = mainPaper.translate();
-      const mainEl = mainPaper.el as HTMLElement;
-      const containerRect = mainEl.getBoundingClientRect();
+    // Map main paper's visible area [0, 0, width, height] to nav paper coordinates
+    // Top-left of main view in logical (unscaled model) coordinates:
+    const logicalX = -mainTranslate.tx / mainScale;
+    const logicalY = -mainTranslate.ty / mainScale;
+    const logicalWidth = mainWidth / mainScale;
+    const logicalHeight = mainHeight / mainScale;
 
-      const miniScale = miniPaper.scale();
-      const miniTranslate = miniPaper.translate();
+    // Convert those logical coordinates into nav paper's screen coordinates
+    const navX = (logicalX * navScale) + navTranslate.tx;
+    const navY = (logicalY * navScale) + navTranslate.ty;
+    const navW = logicalWidth * navScale;
+    const navH = logicalHeight * navScale;
 
-      // Calculate visible area in local coordinates
-      const visibleLeft = -mainTranslate.tx / mainScale.sx;
-      const visibleTop = -mainTranslate.ty / mainScale.sy;
-      const visibleWidth = containerRect.width / mainScale.sx;
-      const visibleHeight = containerRect.height / mainScale.sy;
-
-      // Convert to minimap coordinates
-      setViewport({
-        left: visibleLeft * miniScale.sx + miniTranslate.tx,
-        top: visibleTop * miniScale.sy + miniTranslate.ty,
-        width: visibleWidth * miniScale.sx,
-        height: visibleHeight * miniScale.sy,
-      });
-    };
-
-    // Update on paper transformations
-    const interval = setInterval(updateViewport, 200);
-    updateViewport();
-
-    return () => clearInterval(interval);
+    setViewportStyle({
+      left: navX,
+      top: navY,
+      width: navW,
+      height: navH,
+    });
   }, [paper]);
 
-  // Click on minimap to navigate
-  const handleClick = (e: React.MouseEvent) => {
-    if (!paper || !minimapPaperRef.current || !containerRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
+  // Effect to initialize the secondary paper
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !graph) return;
 
-    const miniScale = minimapPaperRef.current.scale();
-    const miniTranslate = minimapPaperRef.current.translate();
+    const paperDiv = document.createElement('div');
+    paperDiv.style.width = '100%';
+    paperDiv.style.height = '100%';
+    container.appendChild(paperDiv);
 
-    // Convert click to local coordinates
-    const localX = (clickX - miniTranslate.tx) / miniScale.sx;
-    const localY = (clickY - miniTranslate.ty) / miniScale.sy;
+    // Create read-only paper
+    const navPaper = createPaper({
+      el: paperDiv,
+      graph,
+      background: { color: 'transparent' },
+      interactive: false,
+    });
+    
+    navPaperRef.current = navPaper;
 
-    // Center the main paper on this point
-    const mainScale = paper.scale();
-    const mainEl = paper.el as HTMLElement;
-    const containerRect = mainEl.getBoundingClientRect();
+    // Initial sync
+    syncNavPaperScale();
+    if (paper) syncViewportToMainPaper();
 
-    const tx = -localX * mainScale.sx + containerRect.width / 2;
-    const ty = -localY * mainScale.sy + containerRect.height / 2;
+    // Re-sync when graph bounds change (elements added/moved)
+    graph.on('add remove change:position', () => {
+      syncNavPaperScale();
+      syncViewportToMainPaper();
+    });
 
-    paper.translate(tx, ty);
+    return () => {
+      navPaper.remove();
+      if (navPaperRef.current === navPaper) navPaperRef.current = null;
+    };
+  }, [graph, syncNavPaperScale, syncViewportToMainPaper, paper]);
+
+
+  // Effect to sync viewport when main paper pans/zooms
+  useEffect(() => {
+    if (!paper) return;
+
+    const onTransform = () => syncViewportToMainPaper();
+    
+    paper.on('translate', onTransform);
+    paper.on('scale', onTransform);
+    
+    // Also sync on window resize
+    const onResize = () => {
+      syncNavPaperScale();
+      syncViewportToMainPaper();
+    };
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      paper.off('translate', onTransform);
+      paper.off('scale', onTransform);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [paper, syncViewportToMainPaper, syncNavPaperScale]);
+
+
+  // Handle Viewport Dragging (pans the main paper)
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!paper || !navPaperRef.current) return;
+    setIsDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+    initialTranslateRef.current = paper.translate();
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!isDragging || !paper || !navPaperRef.current) return;
+
+    // Calculate how far the mouse moved on the screen
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+
+    // Convert nav screen delta to logical delta
+    const navScale = navPaperRef.current.scale().sx;
+    const logicalDx = dx / navScale;
+    const logicalDy = dy / navScale;
+
+    // Apply logical delta to main paper, adjusting for main scale
+    // Note: To pan the viewport right, we translate the paper left (negative)
+    const mainScale = paper.scale().sx;
+    const newTx = initialTranslateRef.current.tx - (logicalDx * mainScale);
+    const newTy = initialTranslateRef.current.ty - (logicalDy * mainScale);
+
+    paper.translate(newTx, newTy);
+    // (syncViewportToMainPaper is called automatically by paper 'translate' event)
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    setIsDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   return (
-    <MinimapContainer ref={containerRef} onClick={handleClick}>
-      <MinimapLabel>Navigator</MinimapLabel>
-      <MinimapPaperEl ref={paperElRef} />
-      <ViewportIndicator
+    <NavigatorContainer>
+      <PaperWrapper ref={containerRef} />
+      <ViewportBox
         style={{
-          left: `${viewport.left}px`,
-          top: `${viewport.top}px`,
-          width: `${viewport.width}px`,
-          height: `${viewport.height}px`,
+          left: `${viewportStyle.left}px`,
+          top: `${viewportStyle.top}px`,
+          width: `${viewportStyle.width}px`,
+          height: `${viewportStyle.height}px`,
         }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
       />
-    </MinimapContainer>
+    </NavigatorContainer>
   );
 }

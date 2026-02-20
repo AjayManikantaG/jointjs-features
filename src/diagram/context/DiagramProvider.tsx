@@ -21,6 +21,9 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { dia } from '@joint/core';
 import { createGraph } from '../engine/createGraph';
 import { UndoRedoManager, createCommandManager } from '../engine/commandManager';
+import { ClipboardManager } from '../engine/clipboard';
+
+export type DiagramType = 'BPMN' | 'Business Object' | 'Organization' | 'System' | 'Technical Workflow';
 
 // ============================================================
 // CONTEXT TYPES
@@ -35,6 +38,10 @@ interface DiagramContextValue {
   commandManager: UndoRedoManager;
   /** Currently selected cells */
   selectedCells: dia.Cell[];
+  /** The current diagram type being modeled */
+  diagramType: DiagramType;
+  /** Set the active diagram type */
+  setDiagramType: (type: DiagramType) => void;
   /** Set the paper instance (called by Canvas after mount) */
   setPaper: (paper: dia.Paper) => void;
   /** Update the selected cells */
@@ -47,6 +54,10 @@ interface DiagramContextValue {
   deleteSelected: () => void;
   /** Select all elements in the graph */
   selectAll: () => void;
+  /** Copy selected cells */
+  copy: () => void;
+  /** Paste cells from clipboard */
+  paste: () => void;
   /** Clear the selection */
   clearSelection: () => void;
   /** Whether undo is available */
@@ -82,75 +93,125 @@ interface DiagramProviderProps {
 }
 
 export function DiagramProvider({ children }: DiagramProviderProps) {
-  // Create graph and command manager once
-  const graphRef = useRef<dia.Graph>(createGraph());
-  const cmdRef = useRef<UndoRedoManager>(createCommandManager(graphRef.current));
+  // Use state with lazy initializer so they survive Strict Mode double-invocations without being recreated/cleared unexpectedly.
+  const [graph] = useState(() => createGraph());
+  const [cmdManager] = useState(() => createCommandManager(graph));
+  const [clipboardManager] = useState(() => new ClipboardManager(graph));
 
   const [paper, setPaperState] = useState<dia.Paper | null>(null);
   const [selectedCells, setSelectedCells] = useState<dia.Cell[]>([]);
+  const [diagramType, setDiagramType] = useState<DiagramType>('BPMN');
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
-  // Subscribe to command manager state changes
+  // Subscribe to command manager state changes and manage listener lifecycle
   useEffect(() => {
-    const unsubscribe = cmdRef.current.subscribe(() => {
-      setCanUndo(cmdRef.current.canUndo());
-      setCanRedo(cmdRef.current.canRedo());
-    });
-    return unsubscribe;
-  }, []);
+    // Re-attach listeners in case Strict Mode unmounted and detached them
+    cmdManager.attachListeners();
+    
+    // Set initial state
+    setCanUndo(cmdManager.canUndo());
+    setCanRedo(cmdManager.canRedo());
 
-  // Cleanup on unmount
-  useEffect(() => {
+    const unsubscribe = cmdManager.subscribe(() => {
+      setCanUndo(cmdManager.canUndo());
+      setCanRedo(cmdManager.canRedo());
+    });
+    
     return () => {
-      cmdRef.current.destroy();
-      graphRef.current.clear();
+      cmdManager.detachListeners();
+      unsubscribe();
     };
-  }, []);
+  }, [cmdManager]);
 
   const setPaper = useCallback((p: dia.Paper) => {
     setPaperState(p);
   }, []);
 
   const undo = useCallback(() => {
-    cmdRef.current.undo();
-  }, []);
+    cmdManager.undo();
+  }, [cmdManager]);
 
   const redo = useCallback(() => {
-    cmdRef.current.redo();
-  }, []);
+    cmdManager.redo();
+  }, [cmdManager]);
 
   const deleteSelected = useCallback(() => {
     if (selectedCells.length === 0) return;
-    const graph = graphRef.current;
+    
     graph.startBatch('delete');
-    cmdRef.current.startBatch('delete');
-    selectedCells.forEach((cell) => cell.remove());
-    cmdRef.current.stopBatch();
+    cmdManager.startBatch('delete');
+
+    selectedCells.forEach((cell) => {
+      // Auto-Close Gaps logic (only for elements, not links)
+      if (cell.isElement()) {
+        const incoming = graph.getConnectedLinks(cell, { inbound: true });
+        const outgoing = graph.getConnectedLinks(cell, { outbound: true });
+        
+        // If exactly 1 incoming and 1 outgoing, wire them together
+        if (incoming.length === 1 && outgoing.length === 1) {
+          const inLink = incoming[0];
+          const outLink = outgoing[0];
+          
+          const source = inLink.source();
+          const target = outLink.target();
+          
+          // Connect only if they are valid elements/ports (not pointing to nothing)
+          if (source.id && target.id) {
+            const newLink = inLink.clone();
+            newLink.set('source', source);
+            newLink.set('target', target);
+            graph.addCell(newLink);
+          }
+        }
+      }
+
+      // Remove the cell
+      cell.remove();
+    });
+
+    cmdManager.stopBatch();
     graph.stopBatch('delete');
     setSelectedCells([]);
-  }, [selectedCells]);
+  }, [selectedCells, graph, cmdManager]);
 
   const selectAll = useCallback(() => {
-    const elements = graphRef.current.getElements();
+    const elements = graph.getElements();
     setSelectedCells(elements);
-  }, []);
+  }, [graph]);
+
+  const copy = useCallback(() => {
+    if (selectedCells.length > 0) {
+      clipboardManager.copy(selectedCells);
+    }
+  }, [clipboardManager, selectedCells]);
+
+  const paste = useCallback(() => {
+    const pastedCells = clipboardManager.paste();
+    if (pastedCells.length > 0) {
+      setSelectedCells(pastedCells);
+    }
+  }, [clipboardManager]);
 
   const clearSelection = useCallback(() => {
     setSelectedCells([]);
   }, []);
 
   const value: DiagramContextValue = {
-    graph: graphRef.current,
+    graph,
     paper,
-    commandManager: cmdRef.current,
+    commandManager: cmdManager,
     selectedCells,
+    diagramType,
+    setDiagramType,
     setPaper,
     setSelectedCells,
     undo,
     redo,
     deleteSelected,
     selectAll,
+    copy,
+    paste,
     clearSelection,
     canUndo,
     canRedo,

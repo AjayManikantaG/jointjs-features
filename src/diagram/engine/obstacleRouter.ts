@@ -31,6 +31,8 @@ const ROUTER_DEFAULTS = {
     endDirections: ['top', 'right', 'bottom', 'left'] as string[],
     /** Don't treat source/target as obstacles */
     excludeEnds: ['source', 'target'] as ('source' | 'target')[],
+    /** Prefer perpendicular connections when possible */
+    perpendiculatLinks: true,
 };
 
 /**
@@ -56,6 +58,34 @@ export function getObstacleRouterConfig(
 }
 
 /**
+ * Returns router config with an explicit list of obstacle elements,
+ * excluding the link's own source and target.
+ */
+function getRouterForLink(
+    graph: dia.Graph,
+    link: dia.Link,
+): { name: 'manhattan'; args: Record<string, unknown> } {
+    const sourceId = link.source()?.id;
+    const targetId = link.target()?.id;
+
+    // Collect all elements that are NOT the source or target as obstacles
+    const obstacles = graph.getElements().filter((el) => {
+        const id = el.id;
+        return id !== sourceId && id !== targetId;
+    });
+
+    return {
+        name: 'manhattan',
+        args: {
+            ...ROUTER_DEFAULTS,
+            excludeEnds: ['source', 'target'] as ('source' | 'target')[],
+            // Explicitly provide obstacle elements
+            obstacles,
+        },
+    };
+}
+
+/**
  * Force all links in the graph to recalculate their routes.
  * Called after element move/resize/rotate to update obstacle avoidance.
  * 
@@ -69,13 +99,9 @@ export function rerouteAllLinks(graph: dia.Graph): void {
     graph.startBatch('reroute');
     try {
         links.forEach((link) => {
-            // Update the router config to trigger recalculation
-            const currentRouter = link.router();
-            if (currentRouter && typeof currentRouter === 'object' && 'name' in currentRouter) {
-                // Touch the router to force recalculation
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                link.router(getObstacleRouterConfig(graph) as any);
-            }
+            // Recalculate with fresh obstacle list per link
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            link.router(getRouterForLink(graph, link) as any);
         });
     } finally {
         graph.stopBatch('reroute');

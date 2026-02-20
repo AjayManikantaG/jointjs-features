@@ -13,7 +13,7 @@
  * - Inline text editing (double-click)
  * - Context menu dispatching
  * - Tooltip dispatching
- * - Resize & Rotate handles
+ * - Resize & Rotate handles (custom SVG overlay)
  */
 import { dia, g } from '@joint/core';
 
@@ -134,6 +134,9 @@ export function setupPanZoom(paper: dia.Paper): () => void {
 // LASSO (AREA) SELECTION
 // ============================================================
 
+/** Minimum drag distance (in screen px) before a lasso is recognized */
+const LASSO_THRESHOLD = 5;
+
 /**
  * Sets up rubber-band (lasso) area selection.
  * 
@@ -152,15 +155,18 @@ export function setupLassoSelection(
     onSelectionChange: SelectionCallback,
 ): () => void {
     let isSelecting = false;
+    let didLasso = false;           // True when a real lasso drag occurred
+    let justLassoed = false;        // Blocks the next blank:pointerclick after a lasso
     let startPoint = { x: 0, y: 0 };
+    let startClient = { x: 0, y: 0 };
     let selectionRect: SVGRectElement | null = null;
 
     const el = paper.el as HTMLElement;
 
-    // Create the selection rectangle SVG element
+    // Create the selection rectangle SVG element inside the transformed layer
     const createSelectionRect = () => {
-        const svg = el.querySelector('svg');
-        if (!svg) return null;
+        const layers = el.querySelector('svg .joint-layers');
+        if (!layers) return null;
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('class', 'joint-selection-frame');
         rect.setAttribute('fill', 'rgba(123, 97, 255, 0.08)');
@@ -168,7 +174,7 @@ export function setupLassoSelection(
         rect.setAttribute('stroke-width', '1');
         rect.setAttribute('stroke-dasharray', '4 3');
         rect.setAttribute('pointer-events', 'none');
-        svg.appendChild(rect);
+        layers.appendChild(rect);
         return rect;
     };
 
@@ -178,12 +184,22 @@ export function setupLassoSelection(
         if (originalEvent.shiftKey || originalEvent.button !== 0) return;
 
         isSelecting = true;
+        didLasso = false;
         startPoint = { x, y };
+        startClient = { x: originalEvent.clientX, y: originalEvent.clientY };
         selectionRect = createSelectionRect();
     };
 
     const onMouseMove = (e: MouseEvent) => {
         if (!isSelecting || !selectionRect) return;
+
+        // Check minimum drag threshold before showing lasso
+        const screenDx = e.clientX - startClient.x;
+        const screenDy = e.clientY - startClient.y;
+        const screenDist = Math.sqrt(screenDx * screenDx + screenDy * screenDy);
+        if (screenDist < LASSO_THRESHOLD) return;
+
+        didLasso = true;
 
         const clientPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
         const x = Math.min(startPoint.x, clientPoint.x);
@@ -202,25 +218,32 @@ export function setupLassoSelection(
         isSelecting = false;
 
         if (selectionRect) {
-            const clientPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
-            const rect = new g.Rect(
-                Math.min(startPoint.x, clientPoint.x),
-                Math.min(startPoint.y, clientPoint.y),
-                Math.abs(clientPoint.x - startPoint.x),
-                Math.abs(clientPoint.y - startPoint.y),
-            );
-
-            // Find elements within the selection rectangle
-            const selected = graph.getElements().filter((element) => {
-                const bbox = element.getBBox();
-                return rect.containsRect(bbox);
-            });
-
-            onSelectionChange(selected);
-
-            // Remove visual selection rect
             selectionRect.remove();
             selectionRect = null;
+        }
+
+        if (!didLasso) return; // Was just a click, not a drag
+
+        // Mark that a lasso just finished — block the next blank:pointerclick
+        justLassoed = true;
+        setTimeout(() => { justLassoed = false; }, 0);
+
+        const clientPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
+        const rect = new g.Rect(
+            Math.min(startPoint.x, clientPoint.x),
+            Math.min(startPoint.y, clientPoint.y),
+            Math.abs(clientPoint.x - startPoint.x),
+            Math.abs(clientPoint.y - startPoint.y),
+        );
+
+        // Find elements within the selection rectangle
+        const selected = graph.getElements().filter((element) => {
+            const bbox = element.getBBox();
+            return rect.containsRect(bbox);
+        });
+
+        if (selected.length > 0) {
+            onSelectionChange(selected);
         }
     };
 
@@ -229,8 +252,9 @@ export function setupLassoSelection(
         onSelectionChange([elementView.model]);
     };
 
-    // Click on blank to clear selection
+    // Click on blank to clear selection — but not right after a lasso
     const onBlankPointerClick = () => {
+        if (justLassoed) return;
         onSelectionChange([]);
     };
 
@@ -455,6 +479,640 @@ export function highlightCells(paper: dia.Paper, cells: dia.Cell[]): void {
 }
 
 // ============================================================
+// ELEMENT ACTION TOOLBAR + RESIZE & ROTATE HANDLES
+// ============================================================
+
+/** Handle position identifiers */
+type HandlePosition = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+interface HandleInfo {
+    pos: HandlePosition;
+    cursor: string;
+    getXY: (bbox: g.Rect) => { x: number; y: number };
+}
+
+/** The 8 resize handle definitions */
+const RESIZE_HANDLES: HandleInfo[] = [
+    { pos: 'nw', cursor: 'nwse-resize', getXY: (b) => ({ x: b.x, y: b.y }) },
+    { pos: 'n', cursor: 'ns-resize', getXY: (b) => ({ x: b.x + b.width / 2, y: b.y }) },
+    { pos: 'ne', cursor: 'nesw-resize', getXY: (b) => ({ x: b.x + b.width, y: b.y }) },
+    { pos: 'e', cursor: 'ew-resize', getXY: (b) => ({ x: b.x + b.width, y: b.y + b.height / 2 }) },
+    { pos: 'se', cursor: 'nwse-resize', getXY: (b) => ({ x: b.x + b.width, y: b.y + b.height }) },
+    { pos: 's', cursor: 'ns-resize', getXY: (b) => ({ x: b.x + b.width / 2, y: b.y + b.height }) },
+    { pos: 'sw', cursor: 'nesw-resize', getXY: (b) => ({ x: b.x, y: b.y + b.height }) },
+    { pos: 'w', cursor: 'ew-resize', getXY: (b) => ({ x: b.x, y: b.y + b.height / 2 }) },
+];
+
+const HANDLE_SIZE = 8;
+const MIN_SIZE = 40;
+const ROTATE_HANDLE_OFFSET = 30;
+const ACCENT_COLOR = '#7B61FF';
+const ACCENT_HOVER = '#9580FF';
+
+/** Active interaction mode */
+type ToolMode = 'none' | 'resize' | 'rotate';
+
+/** Button definitions for the mini toolbar */
+interface ToolbarButton {
+    id: string;
+    svg: string;
+    title: string;
+}
+
+const TOOLBAR_BUTTONS: ToolbarButton[] = [
+    {
+        id: 'play',
+        title: 'Execute / Run',
+        svg: `<svg viewBox="0 0 16 16" width="14" height="14"><polygon points="3,1 14,8 3,15" fill="currentColor"/></svg>`,
+    },
+    {
+        id: 'resize',
+        title: 'Resize',
+        svg: `<svg viewBox="0 0 16 16" width="14" height="14"><path d="M1,5 L1,1 L5,1 M11,1 L15,1 L15,5 M15,11 L15,15 L11,15 M5,15 L1,15 L1,11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    },
+    {
+        id: 'rotate',
+        title: 'Rotate',
+        svg: `<svg viewBox="0 0 16 16" width="14" height="14"><path d="M13,5.5 A5.5,5.5 0 1,0 12,12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><polyline points="13,2 13,6 9,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    },
+    {
+        id: 'delete',
+        title: 'Delete',
+        svg: `<svg viewBox="0 0 16 16" width="14" height="14"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    },
+];
+
+/**
+ * Sets up element action toolbar with resize and rotate interactions.
+ *
+ * On element click:
+ * - Shows a floating mini-toolbar next to the element with 4 buttons:
+ *   ▶ Play (pulse animation), ⤢ Resize (toggle handles), ↻ Rotate (toggle handle), ✕ Delete
+ * - Clicking Resize toggles the 8 resize handles
+ * - Clicking Rotate toggles the rotate handle
+ * - Clicking Delete removes the element
+ * - Clicking Play triggers a visual "running" pulse effect
+ *
+ * @param paper The dia.Paper instance
+ * @param graph The dia.Graph instance
+ * @param onSelectionChange Callback to notify of selection changes
+ * @returns Cleanup function
+ */
+export function setupResizeRotate(
+    paper: dia.Paper,
+    graph: dia.Graph,
+    onSelectionChange: SelectionCallback,
+): () => void {
+    // ── State ───────────────────────────────────────────────
+    let overlayGroup: SVGGElement | null = null;
+    let toolbarEl: HTMLDivElement | null = null;
+    let activeElement: dia.Element | null = null;
+    let currentMode: ToolMode = 'none';
+    let isDragging = false;
+    let dragType: 'resize' | 'rotate' | null = null;
+    let dragHandle: HandlePosition | null = null;
+    let dragStart = { x: 0, y: 0 };
+    let origBBox = { x: 0, y: 0, width: 0, height: 0 };
+    let origAngle = 0;
+    let batchStarted = false;
+
+    const el = paper.el as HTMLElement;
+    // Grab the parent container (the one with position:relative) for absolute HTML positioning
+    const containerEl = el.parentElement as HTMLElement;
+
+    // ── SVG Helpers ─────────────────────────────────────────
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const createSVG = <T extends SVGElement>(tag: string): T => {
+        return document.createElementNS(svgNS, tag) as T;
+    };
+
+    // ── Cleanup helpers ─────────────────────────────────────
+    const removeOverlay = () => {
+        if (overlayGroup) {
+            overlayGroup.remove();
+            overlayGroup = null;
+        }
+    };
+
+    const removeToolbar = () => {
+        if (toolbarEl) {
+            toolbarEl.remove();
+            toolbarEl = null;
+        }
+    };
+
+    const cleanupAll = () => {
+        removeOverlay();
+        removeToolbar();
+        activeElement = null;
+        currentMode = 'none';
+    };
+
+    // ── Toolbar positioning ─────────────────────────────────
+    const positionToolbar = () => {
+        if (!toolbarEl || !activeElement) return;
+        const bbox = activeElement.getBBox();
+        const scale = paper.scale().sx;
+        const translate = paper.translate();
+
+        // Convert model coords → screen-relative-to-container
+        const screenX = (bbox.x + bbox.width) * scale + translate.tx + 8; // 8px gap to the right
+        const screenY = bbox.y * scale + translate.ty;
+
+        toolbarEl.style.left = `${screenX}px`;
+        toolbarEl.style.top = `${screenY}px`;
+    };
+
+    // ── SVG handle position updater ─────────────────────────
+    const updateHandlePositions = () => {
+        if (!overlayGroup || !activeElement) return;
+        const bbox = activeElement.getBBox();
+        const angle = activeElement.angle() || 0;
+
+        // Resize handles
+        const handles = overlayGroup.querySelectorAll('[data-handle-type="resize"]');
+        handles.forEach((h) => {
+            const pos = h.getAttribute('data-handle-pos') as HandlePosition;
+            const info = RESIZE_HANDLES.find((rh) => rh.pos === pos);
+            if (!info) return;
+            const { x, y } = info.getXY(bbox);
+            h.setAttribute('x', String(x - HANDLE_SIZE / 2));
+            h.setAttribute('y', String(y - HANDLE_SIZE / 2));
+        });
+
+        // Rotate handle + line
+        const rotateHandle = overlayGroup.querySelector('[data-handle-type="rotate"]');
+        const rotateLine = overlayGroup.querySelector('[data-handle-type="rotate-line"]');
+        if (rotateHandle && rotateLine) {
+            const cx = bbox.x + bbox.width / 2;
+            const cy = bbox.y;
+            const rad = (angle * Math.PI) / 180;
+            const offsetY = -ROTATE_HANDLE_OFFSET;
+            const rotatedX = -offsetY * Math.sin(rad);
+            const rotatedY = offsetY * Math.cos(rad);
+
+            rotateHandle.setAttribute('cx', String(cx + rotatedX));
+            rotateHandle.setAttribute('cy', String(cy + rotatedY));
+            (rotateLine as SVGLineElement).setAttribute('x1', String(cx));
+            (rotateLine as SVGLineElement).setAttribute('y1', String(cy));
+            (rotateLine as SVGLineElement).setAttribute('x2', String(cx + rotatedX));
+            (rotateLine as SVGLineElement).setAttribute('y2', String(cy + rotatedY));
+        }
+
+        // Outline
+        const outline = overlayGroup.querySelector('[data-handle-type="outline"]');
+        if (outline) {
+            outline.setAttribute('x', String(bbox.x));
+            outline.setAttribute('y', String(bbox.y));
+            outline.setAttribute('width', String(bbox.width));
+            outline.setAttribute('height', String(bbox.height));
+        }
+
+        // Also reposition the toolbar
+        positionToolbar();
+    };
+
+    // ── Create the floating HTML toolbar ────────────────────
+    const showToolbar = (element: dia.Element) => {
+        removeToolbar();
+        activeElement = element;
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'joint-element-toolbar';
+        Object.assign(toolbar.style, {
+            position: 'absolute',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            padding: '4px',
+            background: 'rgba(22, 22, 26, 0.92)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '10px',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            zIndex: '30',
+            pointerEvents: 'auto',
+            animation: 'toolbarFadeIn 0.15s ease',
+        });
+
+        // Inject keyframe animation
+        if (!document.querySelector('#joint-toolbar-keyframes')) {
+            const style = document.createElement('style');
+            style.id = 'joint-toolbar-keyframes';
+            style.textContent = `
+                @keyframes toolbarFadeIn {
+                    from { opacity: 0; transform: scale(0.9) translateX(-4px); }
+                    to { opacity: 1; transform: scale(1) translateX(0); }
+                }
+                @keyframes elementPulse {
+                    0% { filter: drop-shadow(0 0 0px rgba(123, 97, 255, 0)); }
+                    50% { filter: drop-shadow(0 0 12px rgba(123, 97, 255, 0.8)); }
+                    100% { filter: drop-shadow(0 0 0px rgba(123, 97, 255, 0)); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Create buttons
+        for (const btn of TOOLBAR_BUTTONS) {
+            const button = document.createElement('button');
+            button.className = 'joint-toolbar-btn';
+            button.setAttribute('data-action', btn.id);
+            button.title = btn.title;
+            button.innerHTML = btn.svg;
+            Object.assign(button.style, {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '32px',
+                height: '32px',
+                border: 'none',
+                borderRadius: '7px',
+                background: 'transparent',
+                color: '#9B9BA4',
+                cursor: 'pointer',
+                transition: 'all 0.12s ease',
+                outline: 'none',
+                padding: '0',
+            });
+
+            // Hover effects
+            button.addEventListener('mouseenter', () => {
+                const isActive = button.getAttribute('data-active') === 'true';
+                if (!isActive) {
+                    button.style.background = 'rgba(255,255,255,0.06)';
+                    button.style.color = '#EDEDEF';
+                }
+            });
+            button.addEventListener('mouseleave', () => {
+                const isActive = button.getAttribute('data-active') === 'true';
+                if (!isActive) {
+                    button.style.background = 'transparent';
+                    button.style.color = '#9B9BA4';
+                }
+            });
+
+            // Click handler
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleToolbarAction(btn.id);
+            });
+
+            toolbar.appendChild(button);
+        }
+
+        containerEl.appendChild(toolbar);
+        toolbarEl = toolbar;
+        positionToolbar();
+    };
+
+    // ── Update active state styling on toolbar buttons ───────
+    const updateToolbarActiveState = () => {
+        if (!toolbarEl) return;
+        const buttons = toolbarEl.querySelectorAll('.joint-toolbar-btn');
+        buttons.forEach((btn) => {
+            const action = btn.getAttribute('data-action');
+            const isActive = action === currentMode;
+            (btn as HTMLElement).setAttribute('data-active', String(isActive));
+            if (isActive) {
+                (btn as HTMLElement).style.background = 'rgba(123, 97, 255, 0.2)';
+                (btn as HTMLElement).style.color = '#7B61FF';
+            } else {
+                (btn as HTMLElement).style.background = 'transparent';
+                (btn as HTMLElement).style.color = '#9B9BA4';
+            }
+        });
+    };
+
+    // ── Handle toolbar button clicks ────────────────────────
+    const handleToolbarAction = (action: string) => {
+        if (!activeElement) return;
+
+        switch (action) {
+            case 'play': {
+                // Trigger a visual pulse animation on the element
+                const view = paper.findViewByModel(activeElement);
+                if (view) {
+                    const svgEl = view.el as unknown as HTMLElement;
+                    svgEl.style.animation = 'elementPulse 0.6s ease';
+                    setTimeout(() => {
+                        svgEl.style.animation = '';
+                    }, 600);
+                }
+                break;
+            }
+            case 'resize': {
+                if (currentMode === 'resize') {
+                    // Toggle off
+                    currentMode = 'none';
+                    removeOverlay();
+                } else {
+                    // Toggle on — show resize handles
+                    currentMode = 'resize';
+                    showResizeHandles();
+                }
+                updateToolbarActiveState();
+                break;
+            }
+            case 'rotate': {
+                if (currentMode === 'rotate') {
+                    currentMode = 'none';
+                    removeOverlay();
+                } else {
+                    currentMode = 'rotate';
+                    showRotateHandle();
+                }
+                updateToolbarActiveState();
+                break;
+            }
+            case 'delete': {
+                const elementToRemove = activeElement;
+                cleanupAll();
+                elementToRemove.remove();
+                onSelectionChange([]);
+                break;
+            }
+        }
+    };
+
+    // ── Show resize handles (SVG overlay) ───────────────────
+    const showResizeHandles = () => {
+        removeOverlay();
+        if (!activeElement) return;
+
+        const svg = el.querySelector('svg');
+        if (!svg) return;
+
+        const group = createSVG<SVGGElement>('g');
+        group.setAttribute('class', 'joint-resize-rotate-overlay');
+        group.setAttribute('pointer-events', 'all');
+
+        // Dashed outline
+        const outline = createSVG<SVGRectElement>('rect');
+        outline.setAttribute('data-handle-type', 'outline');
+        outline.setAttribute('fill', 'none');
+        outline.setAttribute('stroke', ACCENT_COLOR);
+        outline.setAttribute('stroke-width', '1');
+        outline.setAttribute('stroke-dasharray', '4 3');
+        outline.setAttribute('pointer-events', 'none');
+        group.appendChild(outline);
+
+        // 8 resize handles
+        for (const handleInfo of RESIZE_HANDLES) {
+            const rect = createSVG<SVGRectElement>('rect');
+            rect.setAttribute('data-handle-type', 'resize');
+            rect.setAttribute('data-handle-pos', handleInfo.pos);
+            rect.setAttribute('width', String(HANDLE_SIZE));
+            rect.setAttribute('height', String(HANDLE_SIZE));
+            rect.setAttribute('fill', '#232329');
+            rect.setAttribute('stroke', ACCENT_COLOR);
+            rect.setAttribute('stroke-width', '1.5');
+            rect.setAttribute('rx', '1.5');
+            rect.setAttribute('cursor', handleInfo.cursor);
+            rect.style.transition = 'fill 0.1s';
+            rect.addEventListener('mouseenter', () => rect.setAttribute('fill', ACCENT_HOVER));
+            rect.addEventListener('mouseleave', () => { if (!isDragging) rect.setAttribute('fill', '#232329'); });
+            group.appendChild(rect);
+        }
+
+        // Append to the layers container which carries the paper's pan/zoom transform
+        const layersContainer = el.querySelector('svg .joint-layers');
+        if (layersContainer) {
+            layersContainer.appendChild(group);
+        }
+        overlayGroup = group;
+        updateHandlePositions();
+    };
+
+    // ── Show rotate handle (SVG overlay) ────────────────────
+    const showRotateHandle = () => {
+        removeOverlay();
+        if (!activeElement) return;
+
+        const svg = el.querySelector('svg');
+        if (!svg) return;
+
+        const group = createSVG<SVGGElement>('g');
+        group.setAttribute('class', 'joint-resize-rotate-overlay');
+        group.setAttribute('pointer-events', 'all');
+
+        // Dashed outline
+        const outline = createSVG<SVGRectElement>('rect');
+        outline.setAttribute('data-handle-type', 'outline');
+        outline.setAttribute('fill', 'none');
+        outline.setAttribute('stroke', ACCENT_COLOR);
+        outline.setAttribute('stroke-width', '1');
+        outline.setAttribute('stroke-dasharray', '4 3');
+        outline.setAttribute('pointer-events', 'none');
+        group.appendChild(outline);
+
+        // Connector line
+        const rotateLine = createSVG<SVGLineElement>('line');
+        rotateLine.setAttribute('data-handle-type', 'rotate-line');
+        rotateLine.setAttribute('stroke', ACCENT_COLOR);
+        rotateLine.setAttribute('stroke-width', '1');
+        rotateLine.setAttribute('stroke-dasharray', '3 2');
+        rotateLine.setAttribute('pointer-events', 'none');
+        group.appendChild(rotateLine);
+
+        // Rotate circle
+        const rotateCircle = createSVG<SVGCircleElement>('circle');
+        rotateCircle.setAttribute('data-handle-type', 'rotate');
+        rotateCircle.setAttribute('r', '6');
+        rotateCircle.setAttribute('fill', '#232329');
+        rotateCircle.setAttribute('stroke', ACCENT_COLOR);
+        rotateCircle.setAttribute('stroke-width', '2');
+        rotateCircle.setAttribute('cursor', 'grab');
+        rotateCircle.style.transition = 'fill 0.1s';
+        rotateCircle.addEventListener('mouseenter', () => rotateCircle.setAttribute('fill', ACCENT_HOVER));
+        rotateCircle.addEventListener('mouseleave', () => { if (!isDragging) rotateCircle.setAttribute('fill', '#232329'); });
+        group.appendChild(rotateCircle);
+
+        // Append to the layers container which carries the paper's pan/zoom transform
+        const layersContainer = el.querySelector('svg .joint-layers');
+        if (layersContainer) {
+            layersContainer.appendChild(group);
+        }
+        overlayGroup = group;
+        updateHandlePositions();
+    };
+
+    // ── Drag interaction on SVG handles ─────────────────────
+    const onOverlayMouseDown = (e: MouseEvent) => {
+        const target = e.target as SVGElement;
+        if (!target || !activeElement) return;
+
+        const handleType = target.getAttribute('data-handle-type');
+        if (!handleType || handleType === 'outline' || handleType === 'rotate-line') return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        isDragging = true;
+        const localPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
+        dragStart = { x: localPoint.x, y: localPoint.y };
+
+        if (handleType === 'rotate') {
+            dragType = 'rotate';
+            dragHandle = null;
+            origAngle = activeElement.angle() || 0;
+        } else if (handleType === 'resize') {
+            dragType = 'resize';
+            dragHandle = target.getAttribute('data-handle-pos') as HandlePosition;
+            const bbox = activeElement.getBBox();
+            origBBox = { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
+        }
+
+        el.style.cursor = handleType === 'rotate' ? 'grabbing' : (target.getAttribute('cursor') || 'default');
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+        if (!isDragging || !activeElement || !dragType) return;
+
+        const localPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
+
+        if (!batchStarted) {
+            batchStarted = true;
+        }
+
+        if (dragType === 'resize' && dragHandle) {
+            const dx = localPoint.x - dragStart.x;
+            const dy = localPoint.y - dragStart.y;
+
+            let newX = origBBox.x;
+            let newY = origBBox.y;
+            let newW = origBBox.width;
+            let newH = origBBox.height;
+
+            switch (dragHandle) {
+                case 'nw':
+                    newX = origBBox.x + dx; newY = origBBox.y + dy;
+                    newW = origBBox.width - dx; newH = origBBox.height - dy;
+                    break;
+                case 'n':
+                    newY = origBBox.y + dy; newH = origBBox.height - dy;
+                    break;
+                case 'ne':
+                    newY = origBBox.y + dy; newW = origBBox.width + dx; newH = origBBox.height - dy;
+                    break;
+                case 'e':
+                    newW = origBBox.width + dx;
+                    break;
+                case 'se':
+                    newW = origBBox.width + dx; newH = origBBox.height + dy;
+                    break;
+                case 's':
+                    newH = origBBox.height + dy;
+                    break;
+                case 'sw':
+                    newX = origBBox.x + dx; newW = origBBox.width - dx; newH = origBBox.height + dy;
+                    break;
+                case 'w':
+                    newX = origBBox.x + dx; newW = origBBox.width - dx;
+                    break;
+            }
+
+            if (newW < MIN_SIZE) {
+                if (dragHandle.includes('w')) newX = origBBox.x + origBBox.width - MIN_SIZE;
+                newW = MIN_SIZE;
+            }
+            if (newH < MIN_SIZE) {
+                if (dragHandle.includes('n')) newY = origBBox.y + origBBox.height - MIN_SIZE;
+                newH = MIN_SIZE;
+            }
+
+            activeElement.position(newX, newY);
+            activeElement.resize(newW, newH);
+            updateHandlePositions();
+        }
+
+        if (dragType === 'rotate') {
+            const bbox = activeElement.getBBox();
+            const center = {
+                x: bbox.x + bbox.width / 2,
+                y: bbox.y + bbox.height / 2,
+            };
+            const angleRad = Math.atan2(localPoint.y - center.y, localPoint.x - center.x);
+            let angleDeg = (angleRad * 180) / Math.PI + 90;
+            if (angleDeg < 0) angleDeg += 360;
+            if (e.shiftKey) angleDeg = Math.round(angleDeg / 15) * 15;
+
+            activeElement.rotate(angleDeg, true);
+            updateHandlePositions();
+        }
+    };
+
+    const onMouseUp = () => {
+        if (isDragging) {
+            isDragging = false;
+            dragType = null;
+            dragHandle = null;
+            batchStarted = false;
+            el.style.cursor = '';
+            updateHandlePositions();
+        }
+    };
+
+    // ── Element / blank click handlers ──────────────────────
+    const onElementPointerClick = (elementView: dia.ElementView) => {
+        const element = elementView.model as dia.Element;
+        if (activeElement === element && toolbarEl) {
+            // Already selected — do nothing (toolbar is showing)
+            return;
+        }
+        // New selection
+        cleanupAll();
+        activeElement = element;
+        showToolbar(element);
+        onSelectionChange([element]);
+    };
+
+    const onBlankPointerClick = () => {
+        cleanupAll();
+        onSelectionChange([]);
+    };
+
+    // Keep handles + toolbar in sync with model changes
+    const onElementChange = () => {
+        if (activeElement) {
+            if (overlayGroup) updateHandlePositions();
+            positionToolbar();
+        }
+    };
+
+    // ── Event binding ───────────────────────────────────────
+    paper.on('element:pointerclick', onElementPointerClick);
+    paper.on('blank:pointerclick', onBlankPointerClick);
+    graph.on('change', onElementChange);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+
+    const svgEl = el.querySelector('svg');
+    const onSvgMouseDown = (e: Event) => {
+        const mouseEvent = e as MouseEvent;
+        const target = mouseEvent.target as SVGElement;
+        if (target && overlayGroup && overlayGroup.contains(target)) {
+            onOverlayMouseDown(mouseEvent);
+        }
+    };
+    if (svgEl) {
+        svgEl.addEventListener('mousedown', onSvgMouseDown, true);
+    }
+
+    return () => {
+        paper.off('element:pointerclick', onElementPointerClick);
+        paper.off('blank:pointerclick', onBlankPointerClick);
+        graph.off('change', onElementChange);
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (svgEl) {
+            svgEl.removeEventListener('mousedown', onSvgMouseDown, true);
+        }
+        cleanupAll();
+    };
+}
+
+// ============================================================
 // KEYBOARD SHORTCUTS
 // ============================================================
 
@@ -466,6 +1124,8 @@ export function highlightCells(paper: dia.Paper, cells: dia.Cell[]): void {
  * - Ctrl/Cmd + Shift + Z: Redo
  * - Delete/Backspace: Delete selected
  * - Ctrl/Cmd + A: Select all
+ * - Ctrl/Cmd + C: Copy selected
+ * - Ctrl/Cmd + V: Paste
  * - Escape: Clear selection
  * 
  * @param handlers Object with handler functions
@@ -476,6 +1136,8 @@ export function setupKeyboardShortcuts(handlers: {
     onRedo: () => void;
     onDelete: () => void;
     onSelectAll: () => void;
+    onCopy: () => void;
+    onPaste: () => void;
     onEscape: () => void;
 }): () => void {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -495,6 +1157,12 @@ export function setupKeyboardShortcuts(handlers: {
         } else if (isMod && e.key === 'z') {
             e.preventDefault();
             handlers.onUndo();
+        } else if (isMod && e.key === 'c') {
+            e.preventDefault();
+            handlers.onCopy();
+        } else if (isMod && e.key === 'v') {
+            e.preventDefault();
+            handlers.onPaste();
         } else if (e.key === 'Delete' || e.key === 'Backspace') {
             e.preventDefault();
             handlers.onDelete();

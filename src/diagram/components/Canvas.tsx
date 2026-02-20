@@ -26,10 +26,12 @@ import {
   setupContextMenu,
   setupTooltips,
   setupKeyboardShortcuts,
+  setupResizeRotate,
   highlightCells,
   type ContextMenuEvent,
   type TooltipEvent,
 } from '../engine/interactions';
+import { setupSnaplines } from '../engine/snaplines';
 
 // ============================================================
 // STYLED COMPONENTS
@@ -82,6 +84,8 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
     selectAll,
     clearSelection,
     selectedCells,
+    copy,
+    paste,
   } = useDiagram();
 
   // Stable references for callbacks
@@ -163,12 +167,24 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
         onRedo: redo,
         onDelete: deleteSelected,
         onSelectAll: selectAll,
+        onCopy: copy,
+        onPaste: paste,
         onEscape: clearSelection,
       }),
     );
 
     // 7. Obstacle-aware routing listeners
     cleanups.push(applyRoutingListeners(newPaper, graph));
+
+    // 8. Resize & Rotate handles
+    cleanups.push(
+      setupResizeRotate(newPaper, graph, (cells) => {
+        setSelectedCells(cells);
+      }),
+    );
+
+    // 9. Snaplines (Alignment Guides)
+    cleanups.push(setupSnaplines(newPaper, graph));
 
     // Center the paper view
     const containerRect = container.getBoundingClientRect();
@@ -211,7 +227,89 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
 
       // Create the element based on type
       const element = createElementFromPalette(nodeData.type, snappedX, snappedY, nodeData.label);
-      graph.addCell(element);
+      
+      // AUTO-INSERT ON LINK LOGIC
+      // Check if dropped near any existing links
+      const elementBBox = element.getBBox();
+      let targetLink: dia.Link | null = null;
+      let minDistance = Infinity;
+
+      const links = graph.getLinks();
+      for (const link of links) {
+        const linkView = currentPaper.findViewByModel(link) as dia.LinkView;
+        if (!linkView) continue;
+
+        // Try to find the closest point on the link connection path
+        // For simplicity, we check if the element's center is close to the link's bounding box
+        // A more robust approach would use geometry intersections, but this works for basic dropping
+        const linkBBox = linkView.getBBox();
+        const center = elementBBox.center();
+        
+        // Check if the center of the dropped element is inside the link's bounding box (with some padding)
+        const paddedLinkBBox = linkBBox.inflate(10);
+        
+        if (paddedLinkBBox.containsPoint(center)) {
+          // It's close enough to trigger insert
+          targetLink = link;
+          break; // Take the first one we find
+        }
+      }
+
+      if (targetLink) {
+        const source = targetLink.source();
+        const target = targetLink.target();
+
+        // 1. Add the new element to the graph
+        graph.addCell(element);
+
+        // 2. Create link from original source -> new element
+        const newLink1 = new shapes.standard.Link({
+          source: source,
+          target: { id: element.id, port: 'in1' },
+          attrs: {
+            line: {
+              stroke: '#A262FF', // Default link styling
+              strokeWidth: 2,
+              targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
+              strokeDasharray: '0',
+            },
+          },
+          router: { name: 'manhattan' },
+          connector: { name: 'rounded' },
+        });
+
+        // 3. Create link from new element -> original target
+        const newLink2 = new shapes.standard.Link({
+          source: { id: element.id, port: 'out1' },
+          target: target,
+          attrs: {
+            line: {
+              stroke: '#A262FF',
+              strokeWidth: 2,
+              targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
+              strokeDasharray: '0',
+            },
+          },
+          router: { name: 'manhattan' },
+          connector: { name: 'rounded' },
+        });
+
+        // 4. Copy routing/connection attributes if needed
+        if (targetLink.get('router')) newLink1.set('router', targetLink.get('router'));
+        if (targetLink.get('connector')) newLink1.set('connector', targetLink.get('connector'));
+        if (targetLink.get('router')) newLink2.set('router', targetLink.get('router'));
+        if (targetLink.get('connector')) newLink2.set('connector', targetLink.get('connector'));
+
+        // 5. Add new links and remove the old one (wrapped in a batch for undo)
+        graph.startBatch('auto-insert-link');
+        targetLink.remove();
+        graph.addCells([newLink1, newLink2]);
+        graph.stopBatch('auto-insert-link');
+        
+      } else {
+        // Normal drop, just add the element
+        graph.addCell(element);
+      }
     },
     [graph],
   );
@@ -229,12 +327,48 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
 }
 
 // ============================================================
-// ELEMENT FACTORY (for palette drops)
+// BPM ELEMENT FACTORY (for palette drops)
 // ============================================================
 
+/** Standard port configuration for BPM elements */
+const BPM_PORT_CONFIG = {
+  groups: {
+    in: {
+      position: 'left',
+      attrs: {
+        circle: {
+          fill: '#232329',
+          stroke: '#7B61FF',
+          strokeWidth: 2,
+          r: 6,
+          magnet: true,
+        },
+      },
+    },
+    out: {
+      position: 'right',
+      attrs: {
+        circle: {
+          fill: '#232329',
+          stroke: '#7B61FF',
+          strokeWidth: 2,
+          r: 6,
+          magnet: true,
+        },
+      },
+    },
+  },
+  items: [
+    { group: 'in', id: 'in1' },
+    { group: 'out', id: 'out1' },
+  ],
+};
+
+const FONT = "'Inter', sans-serif";
+
 /**
- * Creates a JointJS element based on the palette type.
- * Each element has ports for link connections.
+ * Creates a JointJS element based on the BPM shape type.
+ * Maps BPMN 2.0 element types to JointJS shapes with correct styling.
  */
 function createElementFromPalette(
   type: string,
@@ -242,41 +376,73 @@ function createElementFromPalette(
   y: number,
   label: string,
 ): dia.Element {
-  const portConfig = {
-    groups: {
-      in: {
-        position: 'left',
-        attrs: {
-          circle: {
-            fill: '#232329',
-            stroke: '#7B61FF',
-            strokeWidth: 2,
-            r: 6,
-            magnet: true,
-          },
-        },
-      },
-      out: {
-        position: 'right',
-        attrs: {
-          circle: {
-            fill: '#232329',
-            stroke: '#7B61FF',
-            strokeWidth: 2,
-            r: 6,
-            magnet: true,
-          },
-        },
-      },
-    },
-    items: [
-      { group: 'in', id: 'in1' },
-      { group: 'out', id: 'out1' },
-    ],
-  };
-
   switch (type) {
-    case 'rectangle':
+    // ── EVENTS ─────────────────────────────────────────────
+    case 'startEvent':
+      return new shapes.standard.Circle({
+        position: { x, y },
+        size: { width: 60, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#2DD4A8',
+            strokeWidth: 2,
+          },
+          label: {
+            text: label || 'Start',
+            fill: '#EDEDEF',
+            fontSize: 11,
+            fontFamily: FONT,
+            refY: '120%',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'endEvent':
+      return new shapes.standard.Circle({
+        position: { x, y },
+        size: { width: 60, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#FF5C5C',
+            strokeWidth: 4,
+          },
+          label: {
+            text: label || 'End',
+            fill: '#EDEDEF',
+            fontSize: 11,
+            fontFamily: FONT,
+            refY: '120%',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'intermediateEvent':
+      return new shapes.standard.Circle({
+        position: { x, y },
+        size: { width: 60, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#FFB224',
+            strokeWidth: 2,
+          },
+          label: {
+            text: label || 'Intermediate',
+            fill: '#EDEDEF',
+            fontSize: 11,
+            fontFamily: FONT,
+            refY: '120%',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── ACTIVITIES ──────────────────────────────────────────
+    case 'task':
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 160, height: 80 },
@@ -285,110 +451,456 @@ function createElementFromPalette(
             fill: '#232329',
             stroke: '#3A3A44',
             strokeWidth: 1.5,
-            rx: 8,
-            ry: 8,
+            rx: 10,
+            ry: 10,
           },
           label: {
-            text: label || 'Rectangle',
+            text: label || 'Task',
             fill: '#EDEDEF',
             fontSize: 13,
-            fontFamily: "'Inter', sans-serif",
+            fontFamily: FONT,
           },
         },
-        ports: portConfig,
+        ports: BPM_PORT_CONFIG,
       });
 
-    case 'circle':
-      return new shapes.standard.Circle({
+    case 'subProcess':
+      return new shapes.standard.Rectangle({
         position: { x, y },
-        size: { width: 100, height: 100 },
+        size: { width: 180, height: 100 },
         attrs: {
           body: {
             fill: '#232329',
             stroke: '#3A3A44',
             strokeWidth: 1.5,
+            rx: 10,
+            ry: 10,
           },
           label: {
-            text: label || 'Circle',
+            text: label || 'Sub-Process',
             fill: '#EDEDEF',
             fontSize: 13,
-            fontFamily: "'Inter', sans-serif",
+            fontFamily: FONT,
           },
         },
-        ports: portConfig,
+        ports: BPM_PORT_CONFIG,
       });
 
-    case 'diamond': {
+    case 'callActivity':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 160, height: 80 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#9B9BA4',
+            strokeWidth: 3.5,
+            rx: 10,
+            ry: 10,
+          },
+          label: {
+            text: label || 'Call Activity',
+            fill: '#EDEDEF',
+            fontSize: 13,
+            fontFamily: FONT,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── GATEWAYS ────────────────────────────────────────────
+    case 'exclusiveGateway':
       return new shapes.standard.Polygon({
         position: { x, y },
-        size: { width: 120, height: 120 },
+        size: { width: 80, height: 80 },
         attrs: {
           body: {
             fill: '#232329',
-            stroke: '#3A3A44',
-            strokeWidth: 1.5,
+            stroke: '#FFB224',
+            strokeWidth: 2,
             refPoints: '50,0 100,50 50,100 0,50',
           },
           label: {
-            text: label || 'Decision',
-            fill: '#EDEDEF',
-            fontSize: 13,
-            fontFamily: "'Inter', sans-serif",
+            text: '✕',
+            fill: '#FFB224',
+            fontSize: 20,
+            fontFamily: FONT,
+            fontWeight: 'bold',
           },
         },
-        ports: portConfig,
+        ports: BPM_PORT_CONFIG,
       });
-    }
 
-    case 'sticky': {
-      const colors = ['#FFE066', '#FF8AAE', '#6FEDD6', '#80CAFF', '#B49CFF', '#FFB86C'];
-      const color = colors[Math.floor(Math.random() * colors.length)];
-      return new shapes.standard.Rectangle({
+    case 'parallelGateway':
+      return new shapes.standard.Polygon({
         position: { x, y },
-        size: { width: 180, height: 140 },
+        size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: color,
-            stroke: 'none',
-            rx: 4,
-            ry: 4,
-            filter: {
-              name: 'dropShadow',
-              args: { dx: 2, dy: 4, blur: 8, color: 'rgba(0,0,0,0.3)' },
-            },
+            fill: '#232329',
+            stroke: '#FFB224',
+            strokeWidth: 2,
+            refPoints: '50,0 100,50 50,100 0,50',
           },
           label: {
-            text: label || 'Sticky Note',
-            fill: '#0D0D0F',
-            fontSize: 14,
-            fontFamily: "'Inter', sans-serif",
-            fontWeight: 500,
-            textWrap: {
-              width: -20, // 20px padding
-              height: -20,
-              ellipsis: true,
-            },
+            text: '+',
+            fill: '#FFB224',
+            fontSize: 24,
+            fontFamily: FONT,
+            fontWeight: 'bold',
           },
         },
+        ports: BPM_PORT_CONFIG,
       });
-    }
 
-    case 'text':
+    case 'inclusiveGateway':
+      return new shapes.standard.Polygon({
+        position: { x, y },
+        size: { width: 80, height: 80 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#FFB224',
+            strokeWidth: 2,
+            refPoints: '50,0 100,50 50,100 0,50',
+          },
+          label: {
+            text: '○',
+            fill: '#FFB224',
+            fontSize: 20,
+            fontFamily: FONT,
+            fontWeight: 'bold',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── DATA ────────────────────────────────────────────────
+    case 'dataObject':
       return new shapes.standard.Rectangle({
         position: { x, y },
-        size: { width: 200, height: 40 },
+        size: { width: 80, height: 100 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#9B9BA4',
+            strokeWidth: 1.5,
+            rx: 2,
+            ry: 2,
+          },
+          label: {
+            text: label || 'Data Object',
+            fill: '#EDEDEF',
+            fontSize: 11,
+            fontFamily: FONT,
+            refY: '110%',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'dataStore':
+      return new shapes.standard.Circle({
+        position: { x, y },
+        size: { width: 80, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#9B9BA4',
+            strokeWidth: 1.5,
+          },
+          label: {
+            text: label || 'Data Store',
+            fill: '#EDEDEF',
+            fontSize: 11,
+            fontFamily: FONT,
+            refY: '130%',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── BUSINESS OBJECT ──────────────────────────────────────
+    case 'businessObject':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 140, height: 100 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#4A90E2',
+            strokeWidth: 2,
+            rx: 2,
+            ry: 2,
+          },
+          label: {
+            text: label || 'Business Object',
+            fill: '#EDEDEF',
+            fontSize: 13,
+            fontFamily: FONT,
+            fontWeight: 'bold',
+            refY: 20,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'businessAttribute':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 120, height: 40 },
         attrs: {
           body: {
             fill: 'transparent',
-            stroke: 'none',
+            stroke: 'transparent',
           },
           label: {
-            text: label || 'Text',
-            fill: '#EDEDEF',
-            fontSize: 16,
-            fontFamily: "'Inter', sans-serif",
+            text: `• ${label || 'Attribute'}`,
+            fill: '#A0A0A0',
+            fontSize: 12,
+            fontFamily: FONT,
+            textAnchor: 'start',
+            refX: 10,
           },
         },
+        ports: BPM_PORT_CONFIG, // Simplified ports might be better here later
+      });
+
+    case 'businessMethod':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 120, height: 40 },
+        attrs: {
+          body: {
+            fill: 'transparent',
+            stroke: 'transparent',
+          },
+          label: {
+            text: `+ ${label || 'Method'}()`,
+            fill: '#A0A0A0',
+            fontSize: 12,
+            fontFamily: FONT,
+            textAnchor: 'start',
+            refX: 10,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── ORGANIZATION ─────────────────────────────────────────
+    case 'orgUnit':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 160, height: 80 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#F5A623',
+            strokeWidth: 2,
+            rx: 4,
+            ry: 4,
+          },
+          label: {
+            text: label || 'Org Unit',
+            fill: '#EDEDEF',
+            fontSize: 13,
+            fontFamily: FONT,
+            fontWeight: 'bold',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'orgRole':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 140, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#F5A623',
+            strokeWidth: 1.5,
+            strokeDasharray: '4,4',
+            rx: 4,
+            ry: 4,
+          },
+          label: {
+            text: label || 'Role',
+            fill: '#EDEDEF',
+            fontSize: 12,
+            fontFamily: FONT,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'orgPerson':
+      return new shapes.standard.Rectangle({ // Simulating a person node with icon space
+        position: { x, y },
+        size: { width: 120, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#F5A623',
+            strokeWidth: 1.5,
+            rx: 30, // Pill shape
+            ry: 30,
+          },
+          label: {
+            text: label || 'Person',
+            fill: '#EDEDEF',
+            fontSize: 12,
+            fontFamily: FONT,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'orgLocation':
+      return new shapes.standard.Polygon({
+        position: { x, y },
+        size: { width: 100, height: 80 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#F5A623',
+            strokeWidth: 1.5,
+            refPoints: '0,0 100,0 100,60 50,100 0,60', // Pin shape
+          },
+          label: {
+            text: label || 'Location',
+            fill: '#EDEDEF',
+            fontSize: 12,
+            fontFamily: FONT,
+            refY: '40%',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── SYSTEM ARCHITECTURE ──────────────────────────────────
+    case 'sysITSystem':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 160, height: 100 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#7ED321',
+            strokeWidth: 2,
+            rx: 6,
+            ry: 6,
+          },
+          label: {
+            text: label || 'IT System',
+            fill: '#EDEDEF',
+            fontSize: 13,
+            fontFamily: FONT,
+            fontWeight: 'bold',
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'sysDatabase':
+      return new shapes.standard.Cylinder({
+        position: { x, y },
+        size: { width: 100, height: 120 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#7ED321',
+            strokeWidth: 2,
+          },
+          top: {
+            fill: '#232329',
+            stroke: '#7ED321',
+            strokeWidth: 2,
+          },
+          label: {
+            text: label || 'Database',
+            fill: '#EDEDEF',
+            fontSize: 12,
+            fontFamily: FONT,
+          },
+        },
+        ports: {
+          ...BPM_PORT_CONFIG,
+          items: [ // Adjust port positions for cylinder
+            { group: 'in', id: 'in1', args: { y: '50%' } },
+            { group: 'out', id: 'out1', args: { y: '50%' } },
+          ],
+        },
+      });
+
+    case 'sysCluster':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 240, height: 160 },
+        attrs: {
+          body: {
+            fill: 'rgba(126, 211, 33, 0.05)',
+            stroke: '#7ED321',
+            strokeWidth: 2,
+            strokeDasharray: '5,5',
+            rx: 10,
+            ry: 10,
+          },
+          label: {
+            text: label || 'Cluster',
+            fill: '#7ED321',
+            fontSize: 14,
+            fontFamily: FONT,
+            fontWeight: 'bold',
+            refY: 20,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    // ── TECHNICAL ADAPTERS ───────────────────────────────────
+    case 'techDataConverter':
+    case 'techFormatAdapter':
+      return new shapes.standard.Polygon({
+        position: { x, y },
+        size: { width: 140, height: 80 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#BD10E0', // Purple for technical rules/converters
+            strokeWidth: 2,
+            refPoints: '0,50 20,0 100,0 120,50 100,100 20,100', // Hexagon
+          },
+          label: {
+            text: label || 'Converter',
+            fill: '#EDEDEF',
+            fontSize: 12,
+            fontFamily: FONT,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'techSystemConnector':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 120, height: 60 },
+        attrs: {
+          body: {
+            fill: '#232329',
+            stroke: '#BD10E0',
+            strokeWidth: 3, // Thicker border for system connectors
+            rx: 0,
+            ry: 0,
+          },
+          label: {
+            text: label || 'Connector',
+            fill: '#EDEDEF',
+            fontSize: 12,
+            fontFamily: FONT,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
       });
 
     default:
@@ -407,10 +919,10 @@ function createElementFromPalette(
             text: label || 'Node',
             fill: '#EDEDEF',
             fontSize: 13,
-            fontFamily: "'Inter', sans-serif",
+            fontFamily: FONT,
           },
         },
-        ports: portConfig,
+        ports: BPM_PORT_CONFIG,
       });
   }
 }

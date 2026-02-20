@@ -30,6 +30,7 @@ import Minimap from '@/diagram/components/Minimap';
 import PropertyPanel from '@/diagram/components/PropertyPanel';
 import ContextMenu from '@/diagram/components/ContextMenu';
 import Tooltip from '@/diagram/components/Tooltip';
+import WorkbenchLayout from '@/diagram/components/WorkbenchLayout';
 import type { ContextMenuEvent, TooltipEvent } from '@/diagram/engine/interactions';
 
 // ============================================================
@@ -95,38 +96,52 @@ export default function DiagramApp() {
     setTooltipEvent(null);
   }, []);
 
+  const designerContent = (
+    <AppShell>
+      {/* Left: Shape palette */}
+      <Palette />
+
+      {/* Center: Canvas + Toolbar + Minimap */}
+      <CenterColumn>
+        <ToolbarRow>
+          <Toolbar />
+        </ToolbarRow>
+
+        <Canvas
+          onContextMenu={handleContextMenu}
+          onTooltipShow={handleTooltipShow}
+          onTooltipHide={handleTooltipHide}
+        />
+
+        <MinimapWrapper>
+          <Minimap />
+        </MinimapWrapper>
+      </CenterColumn>
+
+      {/* Right: Property panel */}
+      <PropertyPanel />
+
+      {/* Floating overlays */}
+      <ContextMenu event={contextMenuEvent} onClose={handleCloseContextMenu} />
+      <Tooltip event={tooltipEvent} />
+    </AppShell>
+  );
+
+  const repositoryContent = (
+    <div style={{ flex: 1, padding: '24px', color: '#888' }}>
+      <h2>Repository Explorer</h2>
+      <p>This is a placeholder for the repository file browser.</p>
+    </div>
+  );
+
   return (
     <ThemeProvider theme={theme}>
       <GlobalStyles />
       <DiagramProvider>
-        <AppShell>
-          {/* Left: Shape palette */}
-          <Palette />
-
-          {/* Center: Canvas + Toolbar + Minimap */}
-          <CenterColumn>
-            <ToolbarRow>
-              <Toolbar />
-            </ToolbarRow>
-
-            <Canvas
-              onContextMenu={handleContextMenu}
-              onTooltipShow={handleTooltipShow}
-              onTooltipHide={handleTooltipHide}
-            />
-
-            <MinimapWrapper>
-              <Minimap />
-            </MinimapWrapper>
-          </CenterColumn>
-
-          {/* Right: Property panel */}
-          <PropertyPanel />
-
-          {/* Floating overlays */}
-          <ContextMenu event={contextMenuEvent} onClose={handleCloseContextMenu} />
-          <Tooltip event={tooltipEvent} />
-        </AppShell>
+        <WorkbenchLayout 
+          designerContent={designerContent} 
+          repositoryContent={repositoryContent} 
+        />
       </DiagramProvider>
     </ThemeProvider>
   );

@@ -78,7 +78,9 @@ export class UndoRedoManager {
     }
 
     /** Attach graph event listeners to track changes */
-    private attachListeners(): void {
+    public attachListeners(): void {
+        if (this.graphListeners.length > 0) return; // Already attached
+
         // Track cell additions
         const onAdd = (cell: dia.Cell) => {
             if (this.isExecuting) return;
@@ -285,10 +287,15 @@ export class UndoRedoManager {
         this.notify();
     }
 
-    /** Clean up event listeners */
-    destroy(): void {
+    /** Detach graph event listeners */
+    public detachListeners(): void {
         this.graphListeners.forEach((cleanup) => cleanup());
         this.graphListeners = [];
+    }
+
+    /** Clean up all resources */
+    public destroy(): void {
+        this.detachListeners();
         this.listeners = [];
     }
 }

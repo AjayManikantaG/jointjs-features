@@ -146,6 +146,7 @@ export default function PropertyPanel() {
   const [width, setWidth] = useState('');
   const [height, setHeight] = useState('');
   const [fillColor, setFillColor] = useState('#232329');
+  const [rotation, setRotation] = useState('');
 
   const selectedCell = selectedCells.length === 1 ? selectedCells[0] : null;
   const isElement = selectedCell?.isElement();
@@ -176,6 +177,7 @@ export default function PropertyPanel() {
     setWidth(String(Math.round(size.width)));
     setHeight(String(Math.round(size.height)));
     setFillColor((element.attr('body/fill') as string) || '#232329');
+    setRotation(String(Math.round(element.angle() || 0)));
   }, [selectedCell, isElement]);
 
   // Update handlers
@@ -239,6 +241,22 @@ export default function PropertyPanel() {
         commandManager.startBatch('property-edit');
         selectedCell.attr('body/fill', value);
         commandManager.stopBatch();
+      }
+    },
+    [selectedCell, isElement, commandManager],
+  );
+
+  const updateRotation = useCallback(
+    (value: string) => {
+      setRotation(value);
+      if (selectedCell && isElement) {
+        const num = parseFloat(value);
+        if (!isNaN(num)) {
+          const element = selectedCell as dia.Element;
+          commandManager.startBatch('property-edit');
+          element.rotate(num % 360, true);
+          commandManager.stopBatch();
+        }
       }
     },
     [selectedCell, isElement, commandManager],
@@ -351,6 +369,20 @@ export default function PropertyPanel() {
             value={fillColor}
             onChange={(e) => updateColor(e.target.value)}
             placeholder="#hex"
+          />
+        </PropertyRow>
+      </PropertyGroup>
+
+      {/* Rotation */}
+      <PropertyGroup>
+        <GroupLabel>Rotation</GroupLabel>
+        <PropertyRow>
+          <PropertyLabel>°</PropertyLabel>
+          <PropertyInput
+            type="number"
+            value={rotation}
+            onChange={(e) => updateRotation(e.target.value)}
+            placeholder="0"
           />
         </PropertyRow>
       </PropertyGroup>
