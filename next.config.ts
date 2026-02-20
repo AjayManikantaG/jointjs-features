@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Enable styled-components SWC compiler for SSR
+  compiler: {
+    styledComponents: true,
+  },
 };
 
 export default nextConfig;
