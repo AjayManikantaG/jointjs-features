@@ -18,17 +18,12 @@ import { createPaper } from '../engine/createPaper';
 // ============================================================
 
 const NavigatorContainer = styled.div`
-  position: absolute;
-  bottom: 24px;
-  right: 24px;
-  width: 240px;
-  height: 160px;
-  background: ${({ theme }) => theme.colors.bg.elevated};
-  border: ${({ theme }) => theme.glass.border};
-  border-radius: ${({ theme }) => theme.radius.md};
-  box-shadow: ${({ theme }) => theme.shadows.lg};
+  width: 100%;
+  height: 220px;
+  position: relative;
+  background: transparent;
   overflow: hidden;
-  z-index: 20;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -79,10 +74,51 @@ export default function Minimap() {
   // Sync the secondary paper scale to fit all contents
   const syncNavPaperScale = useCallback(() => {
     const navPaper = navPaperRef.current;
-    if (!navPaper || !graph.getElements().length) return;
+    const container = containerRef.current;
     
-    // Scale the overview paper to fit the whole graph
-    navPaper.scaleContentToFit({ padding: 10 });
+    if (!navPaper || !container) return;
+    
+    const elements = graph.getElements();
+    if (elements.length === 0) {
+      // Empty graph
+      navPaper.scale(1, 1);
+      navPaper.translate(0, 0);
+      return;
+    }
+    
+    // 1. Get exact logical bounds of the graph content
+    const bbox = graph.getBBox();
+    if (!bbox || bbox.width === 0 || bbox.height === 0) return;
+
+    // 2. Add padding around the bounding box
+    const padding = 20;
+    const bboxWidth = bbox.width + padding * 2;
+    const bboxHeight = bbox.height + padding * 2;
+
+    // 3. Get exact pixel dimensions of the container
+    const viewWidth = Math.max(container.clientWidth || 1, 1);
+    const viewHeight = Math.max(container.clientHeight || 1, 1);
+
+    // 4. Calculate ratio to fit (preserve aspect ratio)
+    const scaleX = viewWidth / bboxWidth;
+    const scaleY = viewHeight / bboxHeight;
+    // Don't let it scale to 0
+    let finalScale = Math.max(Math.min(scaleX, scaleY), 0.01);
+    
+    // Prevent zooming in infinitely if the shape is tiny
+    const safeScale = Math.min(finalScale, 1.0);
+
+    // 5. Apply the scale
+    navPaper.scale(safeScale, safeScale);
+
+    // 6. Center it mathematically by translating the scaled bbox into the view rect
+    const scaledBboxWidth = bbox.width * safeScale;
+    const scaledBboxHeight = bbox.height * safeScale;
+    
+    const tx = (viewWidth - scaledBboxWidth) / 2 - (bbox.x * safeScale);
+    const ty = (viewHeight - scaledBboxHeight) / 2 - (bbox.y * safeScale);
+
+    navPaper.translate(tx, ty);
   }, [graph]);
 
   // Sync the viewport box to exactly match what the main paper shows
@@ -137,19 +173,21 @@ export default function Minimap() {
     paperDiv.style.height = '100%';
     container.appendChild(paperDiv);
 
-    // Create read-only paper
+    // Create read-only paper with explicit pixel dimensions to prevent scaleContentToFit bugs
     const navPaper = createPaper({
       el: paperDiv,
       graph,
+      width: container.clientWidth,
+      height: container.clientHeight,
       background: { color: 'transparent' },
+      async: false, // Must be false so we can instantly scale it to fit
       interactive: false,
     });
     
+    // JointJS frozen:true by default; unfreeze immediately to render
+    navPaper.unfreeze();
+    
     navPaperRef.current = navPaper;
-
-    // Initial sync
-    syncNavPaperScale();
-    if (paper) syncViewportToMainPaper();
 
     // Re-sync when graph bounds change (elements added/moved)
     graph.on('add remove change:position', () => {
@@ -157,7 +195,20 @@ export default function Minimap() {
       syncViewportToMainPaper();
     });
 
+    // Also sync on pointerup to ensure final positions are captured
+    paper?.on('cell:pointerup', () => {
+      syncNavPaperScale();
+      syncViewportToMainPaper();
+    });
+
+    // Fallback timer for robust initial rendering (DOM might not be ready)
+    const timer = setTimeout(() => {
+      syncNavPaperScale();
+      syncViewportToMainPaper();
+    }, 1000);
+
     return () => {
+      clearTimeout(timer);
       navPaper.remove();
       if (navPaperRef.current === navPaper) navPaperRef.current = null;
     };
@@ -173,17 +224,26 @@ export default function Minimap() {
     paper.on('translate', onTransform);
     paper.on('scale', onTransform);
     
-    // Also sync on window resize
-    const onResize = () => {
+    // Also sync and resize paper when container resizes
+    const resizeObserver = new ResizeObserver(() => {
+      if (navPaperRef.current && containerRef.current) {
+         navPaperRef.current.setDimensions(
+          containerRef.current.clientWidth,
+          containerRef.current.clientHeight
+        );
+      }
       syncNavPaperScale();
       syncViewportToMainPaper();
-    };
-    window.addEventListener('resize', onResize);
+    });
+    
+    if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
       paper.off('translate', onTransform);
       paper.off('scale', onTransform);
-      window.removeEventListener('resize', onResize);
+      resizeObserver.disconnect();
     };
   }, [paper, syncViewportToMainPaper, syncNavPaperScale]);
 

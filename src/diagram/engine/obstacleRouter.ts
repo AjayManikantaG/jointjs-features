@@ -31,8 +31,8 @@ const ROUTER_DEFAULTS = {
     endDirections: ['top', 'right', 'bottom', 'left'] as string[],
     /** Don't treat source/target as obstacles */
     excludeEnds: ['source', 'target'] as ('source' | 'target')[],
-    /** Prefer perpendicular connections when possible */
-    perpendiculatLinks: true,
+    /** Prefer orthogonal lines where possible */
+    perpendicular: true,
 };
 
 /**
@@ -58,54 +58,21 @@ export function getObstacleRouterConfig(
 }
 
 /**
- * Returns router config with an explicit list of obstacle elements,
- * excluding the link's own source and target.
- */
-function getRouterForLink(
-    graph: dia.Graph,
-    link: dia.Link,
-): { name: 'manhattan'; args: Record<string, unknown> } {
-    const sourceId = link.source()?.id;
-    const targetId = link.target()?.id;
-
-    // Collect all elements that are NOT the source or target as obstacles
-    const obstacles = graph.getElements().filter((el) => {
-        const id = el.id;
-        return id !== sourceId && id !== targetId;
-    });
-
-    return {
-        name: 'manhattan',
-        args: {
-            ...ROUTER_DEFAULTS,
-            excludeEnds: ['source', 'target'] as ('source' | 'target')[],
-            // Explicitly provide obstacle elements
-            obstacles,
-        },
-    };
-}
-
-/**
  * Force all links in the graph to recalculate their routes.
  * Called after element move/resize/rotate to update obstacle avoidance.
- * 
- * Uses batching to avoid multiple re-renders during bulk updates.
  */
-export function rerouteAllLinks(graph: dia.Graph): void {
+export function rerouteAllLinks(paper: dia.Paper, graph: dia.Graph): void {
     const links = graph.getLinks();
     if (links.length === 0) return;
 
-    // Batch the updates for performance
-    graph.startBatch('reroute');
-    try {
-        links.forEach((link) => {
-            // Recalculate with fresh obstacle list per link
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            link.router(getRouterForLink(graph, link) as any);
-        });
-    } finally {
-        graph.stopBatch('reroute');
-    }
+    // We can just ask the paper to update the connection for each link view
+    // without polluting the undo/redo stack or the JSON model with dummy router assignments.
+    links.forEach((link) => {
+        const view = paper.findViewByModel(link) as dia.LinkView;
+        if (view) {
+            view.requestConnectionUpdate();
+        }
+    });
 }
 
 /**
@@ -137,10 +104,10 @@ export function applyRoutingListeners(
     graph: dia.Graph,
 ): () => void {
     // Debounced reroute to handle rapid dragging
-    const debouncedReroute = debounce(() => rerouteAllLinks(graph), 50);
+    const debouncedReroute = debounce(() => rerouteAllLinks(paper, graph), 50);
 
     // Immediate reroute for discrete actions
-    const immediateReroute = () => rerouteAllLinks(graph);
+    const immediateReroute = () => rerouteAllLinks(paper, graph);
 
     // Listen to element position changes (during and after drag)
     graph.on('change:position', debouncedReroute);

@@ -106,15 +106,29 @@ export class UndoRedoManager {
         };
 
         // Track attribute changes
-        const onChange = (cell: dia.Cell, _opt: unknown) => {
-            if (this.isExecuting) return;
-            const previous = cell.previousAttributes();
-            const current = cell.toJSON();
+        const onChange = (cell: dia.Cell, opt: Record<string, unknown>) => {
+            if (this.isExecuting || opt.dry) return;
+
+            // Optimization: Only track specific attributes that changed in this tick
+            const changed = cell.changed;
+            if (!changed || Object.keys(changed).length === 0) return;
+
+            const previousState: Record<string, unknown> = {};
+            const newState: Record<string, unknown> = {};
+            const prevAttrs = cell.previousAttributes();
+
+            // Only capture the delta
+            Object.keys(changed).forEach((key) => {
+                // Skip internal/computed properties if necessary, but keep core attributes
+                previousState[key] = JSON.parse(JSON.stringify(prevAttrs[key]));
+                newState[key] = JSON.parse(JSON.stringify(cell.get(key)));
+            });
+
             this.pushCommand({
                 type: 'change',
                 cellId: cell.id as string,
-                previousState: JSON.parse(JSON.stringify(previous)),
-                newState: JSON.parse(JSON.stringify(current)),
+                previousState,
+                newState,
             });
         };
 

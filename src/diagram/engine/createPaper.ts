@@ -29,6 +29,10 @@ export interface CreatePaperOptions {
     async?: boolean;
     /** Background color (default: transparent) */
     background?: { color: string };
+    /** Draw grid options (default: none) */
+    drawGrid?: boolean | Record<string, unknown>;
+    /** Interactivity options or boolean (default: true) */
+    interactive?: boolean | any;
 }
 
 /**
@@ -42,8 +46,10 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
         width = 4000,
         height = 4000,
         gridSize = 20,
+        drawGrid,
         async: asyncRendering = true,
         background = { color: 'transparent' },
+        interactive = { linkMove: true, labelMove: true, elementMove: true },
     } = options;
 
     const paper = new dia.Paper({
@@ -52,6 +58,7 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
         width,
         height,
         gridSize,
+        drawGrid,
         async: asyncRendering,
         background,
         cellViewNamespace: shapes,
@@ -85,20 +92,37 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
         // Validate new connections
         validateConnection: (
             cellViewS: dia.CellView,
-            _magnetS: SVGElement | null,
+            magnetS: SVGElement | null,
             cellViewT: dia.CellView,
-            _magnetT: SVGElement | null,
+            magnetT: SVGElement | null,
         ) => {
             // Prevent self-connections
-            return cellViewS !== cellViewT;
+            if (cellViewS === cellViewT) return false;
+
+            // Ensure magnets are present (we are connecting ports)
+            if (!magnetS || !magnetT) return false;
+
+            const portIdS = magnetS.getAttribute('port');
+            const portIdT = magnetT.getAttribute('port');
+
+            if (!portIdS || !portIdT) return false;
+
+            const modelS = cellViewS.model;
+            const modelT = cellViewT.model;
+
+            if (!modelS.isElement() || !modelT.isElement()) return false;
+
+            const portS = (modelS as dia.Element).getPort(portIdS);
+            const portT = (modelT as dia.Element).getPort(portIdT);
+
+            if (!portS || !portT) return false;
+
+            // Rule: Connect strictly from Output (right) to Input (left)
+            return portS.group === 'out' && portT.group === 'in';
         },
 
         // Make elements interactive
-        interactive: {
-            linkMove: true,
-            labelMove: true,
-            elementMove: true,
-        },
+        interactive,
 
         // Frozen initially — unfreeze after setup
         frozen: true,

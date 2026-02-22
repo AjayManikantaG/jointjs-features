@@ -5,45 +5,45 @@
  */
 export const theme = {
     colors: {
-        // Background layers (darkest → lightest)
+        // Background layers (lightest → slightly darker)
         bg: {
-            primary: '#0D0D0F',
-            secondary: '#16161A',
-            tertiary: '#1E1E24',
-            elevated: '#232329',
-            canvas: '#1A1A20',
+            primary: '#F4F5F7',       // Main app background
+            secondary: '#FFFFFF',     // Panels, Modals
+            tertiary: '#FAFBFC',      // Sidebars
+            elevated: '#FFFFFF',      // Dropdowns, floating
+            canvas: '#EAECEF',        // Diagram canvas background
         },
         // Accent colors
         accent: {
-            primary: '#7B61FF',       // Purple accent (FigJam-like)
-            primaryHover: '#9580FF',
-            secondary: '#00C2FF',     // Cyan accent
-            success: '#2DD4A8',
-            warning: '#FFB224',
-            danger: '#FF5C5C',
+            primary: '#D3A33A',       // Golden/Orange accent from wireframe (Finish button)
+            primaryHover: '#C29329',
+            secondary: '#4A90E2',     // Blue accent
+            success: '#00C853',
+            warning: '#F5A623',
+            danger: '#D0021B',
         },
         // Text colors
         text: {
-            primary: '#EDEDEF',
-            secondary: '#9B9BA4',
-            tertiary: '#6B6B76',
-            inverse: '#0D0D0F',
+            primary: '#172B4D',
+            secondary: '#42526E',
+            tertiary: '#7A869A',
+            inverse: '#FFFFFF',
         },
         // Border colors
         border: {
-            subtle: '#2A2A32',
-            default: '#3A3A44',
-            strong: '#4A4A56',
-            accent: '#7B61FF',
+            subtle: '#DFE1E6',
+            default: '#C1C7D0',
+            strong: '#97A0AF',
+            accent: '#D3A33A',
         },
         // Node/element colors (sticky note palette)
         node: {
-            yellow: '#FFE066',
-            pink: '#FF8AAE',
-            green: '#6FEDD6',
-            blue: '#80CAFF',
-            purple: '#B49CFF',
-            orange: '#FFB86C',
+            yellow: '#FFF0B3',
+            pink: '#FFC4E2',
+            green: '#ABF5D1',
+            blue: '#B3D4FF',
+            purple: '#E3DAFF',
+            orange: '#FFE2BD',
             white: '#FFFFFF',
         },
     },
@@ -80,15 +80,15 @@ export const theme = {
         },
     },
     shadows: {
-        sm: '0 1px 3px rgba(0,0,0,0.4)',
-        md: '0 4px 12px rgba(0,0,0,0.5)',
-        lg: '0 8px 24px rgba(0,0,0,0.6)',
-        glow: '0 0 20px rgba(123, 97, 255, 0.3)',
+        sm: '0 1px 3px rgba(9, 30, 66, 0.1)',
+        md: '0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31)',
+        lg: '0 8px 16px -4px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31)',
+        glow: '0 0 20px rgba(211, 163, 58, 0.3)',
     },
     glass: {
-        background: 'rgba(22, 22, 26, 0.85)',
-        border: '1px solid rgba(255, 255, 255, 0.06)',
-        backdropFilter: 'blur(20px)',
+        background: 'rgba(255, 255, 255, 0.9)',
+        border: '1px solid rgba(9, 30, 66, 0.08)',
+        backdropFilter: 'blur(10px)',
     },
     transitions: {
         fast: '0.15s ease',

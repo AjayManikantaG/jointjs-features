@@ -24,6 +24,7 @@ import { UndoRedoManager, createCommandManager } from '../engine/commandManager'
 import { ClipboardManager } from '../engine/clipboard';
 
 export type DiagramType = 'BPMN' | 'Business Object' | 'Organization' | 'System' | 'Technical Workflow';
+export type InteractionMode = 'pointer' | 'pan';
 
 // ============================================================
 // CONTEXT TYPES
@@ -42,6 +43,10 @@ interface DiagramContextValue {
   diagramType: DiagramType;
   /** Set the active diagram type */
   setDiagramType: (type: DiagramType) => void;
+  /** The current interaction mode */
+  interactionMode: InteractionMode;
+  /** Set the active interaction mode */
+  setInteractionMode: (mode: InteractionMode) => void;
   /** Set the paper instance (called by Canvas after mount) */
   setPaper: (paper: dia.Paper) => void;
   /** Update the selected cells */
@@ -64,6 +69,8 @@ interface DiagramContextValue {
   canUndo: boolean;
   /** Whether redo is available */
   canRedo: boolean;
+  /** Direct access to the UndoRedoManager */
+  undoRedoManager: UndoRedoManager | null;
 }
 
 // ============================================================
@@ -101,6 +108,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
   const [paper, setPaperState] = useState<dia.Paper | null>(null);
   const [selectedCells, setSelectedCells] = useState<dia.Cell[]>([]);
   const [diagramType, setDiagramType] = useState<DiagramType>('BPMN');
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>('pointer');
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
@@ -204,6 +212,8 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
     selectedCells,
     diagramType,
     setDiagramType,
+    interactionMode,
+    setInteractionMode,
     setPaper,
     setSelectedCells,
     undo,
@@ -215,6 +225,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
     clearSelection,
     canUndo,
     canRedo,
+    undoRedoManager: cmdManager,
   };
 
   return (

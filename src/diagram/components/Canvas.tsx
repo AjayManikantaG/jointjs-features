@@ -30,6 +30,7 @@ import {
   highlightCells,
   type ContextMenuEvent,
   type TooltipEvent,
+  setupMultiSelectionMove,
 } from '../engine/interactions';
 import { setupSnaplines } from '../engine/snaplines';
 
@@ -38,19 +39,12 @@ import { setupSnaplines } from '../engine/snaplines';
 // ============================================================
 
 const CanvasContainer = styled.div`
-  flex: 1;
+  width: 100%;
+  height: 100%;
   position: relative;
   overflow: hidden;
   background: ${({ theme }) => theme.colors.bg.canvas};
   cursor: default;
-
-  /* Dot grid background pattern */
-  background-image: radial-gradient(
-    circle,
-    ${({ theme }) => theme.colors.border.subtle} 1px,
-    transparent 1px
-  );
-  background-size: 20px 20px;
 `;
 
 const PaperWrapper = styled.div`
@@ -69,9 +63,10 @@ interface CanvasProps {
   onContextMenu?: (event: ContextMenuEvent) => void;
   onTooltipShow?: (event: TooltipEvent) => void;
   onTooltipHide?: () => void;
+  onConfigure?: (cell: dia.Cell) => void;
 }
 
-export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: CanvasProps) {
+export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, onConfigure }: CanvasProps) {
   const paperContainerRef = useRef<HTMLDivElement>(null);
   const {
     graph,
@@ -86,19 +81,31 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
     selectedCells,
     copy,
     paste,
+    interactionMode,
+    undoRedoManager,
   } = useDiagram();
 
   // Stable references for callbacks
   const onContextMenuRef = useRef(onContextMenu);
   const onTooltipShowRef = useRef(onTooltipShow);
   const onTooltipHideRef = useRef(onTooltipHide);
+  const onConfigureRef = useRef(onConfigure);
+  
+  const interactionModeRef = useRef(interactionMode);
+  interactionModeRef.current = interactionMode;
+  
   onContextMenuRef.current = onContextMenu;
   onTooltipShowRef.current = onTooltipShow;
   onTooltipHideRef.current = onTooltipHide;
+  onConfigureRef.current = onConfigure;
 
   // Ref to access paper without causing re-render loop in callbacks
   const paperRef = useRef<dia.Paper | null>(null);
   paperRef.current = paper;
+
+  // Ref to access selected cells in interaction callbacks
+  const selectedCellsRef = useRef<dia.Cell[]>(selectedCells);
+  selectedCellsRef.current = selectedCells;
 
   // Initialize paper and all interactions
   useEffect(() => {
@@ -119,7 +126,16 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
     const newPaper = createPaper({
       el: paperDiv,
       graph,
-      background: { color: 'transparent' },
+      drawGrid: { 
+        name: 'dot', 
+        args: [
+          { color: '#C8C8D0', thickness: 2, scaleFactor: 5 },
+          { color: '#C8C8D0', thickness: 2, scaleFactor: 2 },
+          { color: '#C8C8D0', thickness: 1, scaleFactor: 1 },
+          { color: '#C8C8D0', thickness: 1, scaleFactor: 0.5 },
+          { color: '#C8C8D0', thickness: 1, scaleFactor: 0.1 }
+        ]
+      },
     });
 
     // Register with context
@@ -132,17 +148,17 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
     const cleanups: (() => void)[] = [];
 
     // 1. Pan & Zoom
-    cleanups.push(setupPanZoom(newPaper));
+    cleanups.push(setupPanZoom(newPaper, () => interactionModeRef.current));
 
     // 2. Lasso selection
     cleanups.push(
-      setupLassoSelection(newPaper, graph, (cells) => {
+      setupLassoSelection(newPaper, graph, () => interactionModeRef.current, (cells) => {
         setSelectedCells(cells);
       }),
     );
 
     // 3. Inline text editing
-    cleanups.push(setupInlineEdit(newPaper));
+    cleanups.push(setupInlineEdit(newPaper, undoRedoManager || undefined));
 
     // 4. Context menu
     cleanups.push(
@@ -180,11 +196,25 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
     cleanups.push(
       setupResizeRotate(newPaper, graph, (cells) => {
         setSelectedCells(cells);
-      }),
+      }, undoRedoManager || undefined),
     );
 
     // 9. Snaplines (Alignment Guides)
     cleanups.push(setupSnaplines(newPaper, graph));
+
+    // 10. Multi-selection Drag
+    cleanups.push(
+      setupMultiSelectionMove(newPaper, graph, () => selectedCellsRef.current, undoRedoManager || undefined),
+    );
+
+    // 11. Configuration Modal listener
+    newPaper.on('element:configure', (elementView: dia.ElementView | dia.Element) => {
+      // It might pass the element directly depending on how we triggered it
+      const cell = elementView instanceof dia.Element ? elementView : elementView.model;
+      if (onConfigureRef.current) {
+        onConfigureRef.current(cell);
+      }
+    });
 
     // Center the paper view
     const containerRect = container.getBoundingClientRect();
@@ -314,13 +344,24 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide }: 
     [graph],
   );
 
-  const onDragOver = useCallback((e: React.DragEvent) => {
+  // Handle drag enter to allow drop in all browsers
+  const onDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  // Handle drag over to allow drop
+  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
   return (
-    <CanvasContainer onDrop={onDrop} onDragOver={onDragOver}>
+    <CanvasContainer
+      onDrop={onDrop}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+    >
       <PaperWrapper ref={paperContainerRef} />
     </CanvasContainer>
   );
@@ -364,6 +405,20 @@ const BPM_PORT_CONFIG = {
   ],
 };
 
+const START_PORT_CONFIG = {
+  ...BPM_PORT_CONFIG,
+  items: [
+    { group: 'out', id: 'out1' },
+  ],
+};
+
+const END_PORT_CONFIG = {
+  ...BPM_PORT_CONFIG,
+  items: [
+    { group: 'in', id: 'in1' },
+  ],
+};
+
 const FONT = "'Inter', sans-serif";
 
 /**
@@ -396,7 +451,7 @@ function createElementFromPalette(
             refY: '120%',
           },
         },
-        ports: BPM_PORT_CONFIG,
+        ports: START_PORT_CONFIG,
       });
 
     case 'endEvent':
@@ -417,7 +472,7 @@ function createElementFromPalette(
             refY: '120%',
           },
         },
-        ports: BPM_PORT_CONFIG,
+        ports: END_PORT_CONFIG,
       });
 
     case 'intermediateEvent':

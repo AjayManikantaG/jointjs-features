@@ -16,6 +16,7 @@
  * - Resize & Rotate handles (custom SVG overlay)
  */
 import { dia, g } from '@joint/core';
+import type { UndoRedoManager } from './commandManager';
 
 // ============================================================
 // TYPES
@@ -59,7 +60,7 @@ export type SelectionCallback = (cells: dia.Cell[]) => void;
  * @param paper The dia.Paper instance
  * @returns Cleanup function
  */
-export function setupPanZoom(paper: dia.Paper): () => void {
+export function setupPanZoom(paper: dia.Paper, getInteractionMode: () => 'pointer' | 'pan'): () => void {
     let isPanning = false;
     let panStart = { x: 0, y: 0 };
     let originStart = { tx: 0, ty: 0 };
@@ -94,8 +95,8 @@ export function setupPanZoom(paper: dia.Paper): () => void {
     // --- PAN via shift+drag or middle mouse on blank area ---
     const onBlankPointerDown = (evt: dia.Event, x: number, y: number) => {
         const originalEvent = evt.originalEvent as MouseEvent;
-        // Shift+left click or middle mouse button
-        if (originalEvent.shiftKey || originalEvent.button === 1) {
+        // Shift+left click, middle mouse button, or pan mode
+        if (originalEvent.shiftKey || originalEvent.button === 1 || getInteractionMode() === 'pan') {
             isPanning = true;
             panStart = { x: originalEvent.clientX, y: originalEvent.clientY };
             const translate = paper.translate();
@@ -152,6 +153,7 @@ const LASSO_THRESHOLD = 5;
 export function setupLassoSelection(
     paper: dia.Paper,
     graph: dia.Graph,
+    getInteractionMode: () => 'pointer' | 'pan',
     onSelectionChange: SelectionCallback,
 ): () => void {
     let isSelecting = false;
@@ -180,8 +182,8 @@ export function setupLassoSelection(
 
     const onBlankPointerDown = (evt: dia.Event, x: number, y: number) => {
         const originalEvent = evt.originalEvent as MouseEvent;
-        // Only lasso on plain left click (not shift, which is pan)
-        if (originalEvent.shiftKey || originalEvent.button !== 0) return;
+        // Only lasso on plain left click (not shift, which is pan), and only if pointer mode
+        if (originalEvent.shiftKey || originalEvent.button !== 0 || getInteractionMode() === 'pan') return;
 
         isSelecting = true;
         didLasso = false;
@@ -286,65 +288,134 @@ export function setupLassoSelection(
  * @param paper The dia.Paper instance
  * @returns Cleanup function
  */
-export function setupInlineEdit(paper: dia.Paper): () => void {
+export function setupInlineEdit(paper: dia.Paper, commandManager?: UndoRedoManager): () => void {
     let activeInput: HTMLInputElement | null = null;
+    let originalText = '';
+    let editingCell: dia.Cell | null = null;
 
-    const onElementDblClick = (elementView: dia.ElementView) => {
+    const onElementDblClick = (elementView: dia.ElementView, evt: dia.Event) => {
         if (activeInput) {
             activeInput.blur();
             return;
         }
 
         const model = elementView.model;
-        const bbox = elementView.getBBox();
-        const paperRect = (paper.el as HTMLElement).getBoundingClientRect();
-        const scale = paper.scale().sx;
-        const translate = paper.translate();
+        editingCell = model;
 
-        // Get current label text
-        const currentText =
+        // Find the text we want to edit
+        originalText =
             (model.attr('label/text') as string) ||
             (model.attr('text/text') as string) ||
             (model.attr('body/text') as string) ||
             '';
 
-        // Create input element
+        // Calculate precise screen coordinates for the element center
+        const bbox = elementView.getBBox();
+        const center = bbox.center();
+        const screenPoint = paper.localToClientPoint(center);
+        const screenX = screenPoint.x;
+        const screenY = screenPoint.y;
+        const scale = paper.scale().sx;
+
+        // Create overlay input
         const input = document.createElement('input');
         input.className = 'joint-inline-editor';
-        input.value = currentText;
-        input.style.left = `${bbox.x * scale + translate.tx + paperRect.left - (paper.el as HTMLElement).offsetLeft}px`;
-        input.style.top = `${bbox.y * scale + translate.ty + paperRect.top - (paper.el as HTMLElement).offsetTop}px`;
-        input.style.width = `${bbox.width * scale}px`;
-        input.style.height = `${bbox.height * scale}px`;
-        input.style.fontSize = `${13 * scale}px`;
+        input.value = originalText;
 
-        const container = paper.el as HTMLElement;
-        container.style.position = 'relative';
-        container.appendChild(input);
+        // Inject premium styles if not present
+        if (!document.querySelector('#joint-editor-styles')) {
+            const style = document.createElement('style');
+            style.id = 'joint-editor-styles';
+            style.textContent = `
+                @keyframes editorPopIn {
+                    from { opacity: 0; transform: translate(-50%, -40%) scale(0.95); }
+                    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                }
+                .joint-inline-editor {
+                    position: fixed;
+                    transform: translate(-50%, -50%);
+                    min-width: 140px;
+                    text-align: center;
+                    font-family: 'Inter', sans-serif;
+                    font-weight: 500;
+                    padding: 8px 12px;
+                    border-radius: 12px;
+                    border: 1px solid rgba(123, 97, 255, 0.4);
+                    background: rgba(22, 22, 26, 0.95);
+                    backdrop-filter: blur(12px);
+                    color: white;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+                    outline: none;
+                    z-index: 1000;
+                    animation: editorPopIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.1) forwards;
+                    transition: border-color 0.2s;
+                }
+                .joint-inline-editor:focus {
+                    border-color: #7B61FF;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 2px rgba(123, 97, 255, 0.3);
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Object.assign styles for positioning
+        Object.assign(input.style, {
+            left: `${screenX}px`,
+            top: `${screenY}px`,
+            fontSize: `${Math.max(12, 14 * scale)}px`,
+        });
+
+        // We append to document.body to avoid clipping inside the paper container
+        document.body.appendChild(input);
+
+        // Focus and highlight text
         input.focus();
         input.select();
         activeInput = input;
 
-        const finishEdit = () => {
-            const newText = input.value;
-            // Update the element's label
-            if (model.attr('label/text') !== undefined) {
-                model.attr('label/text', newText);
-            } else {
-                model.attr('label/text', newText);
+        // Commit changes securely via CommandManager
+        const commitEdit = (revert = false) => {
+            if (!activeInput || !editingCell) return;
+
+            const newText = revert ? originalText : activeInput.value;
+
+            // Only create history entry if the text actually changed
+            if (newText !== originalText && !revert) {
+                // Ensure undo history groups this as a single action
+                if (commandManager) commandManager.startBatch('inline-edit');
+
+                if (editingCell.attr('label/text') !== undefined) {
+                    editingCell.attr('label/text', newText);
+                } else if (editingCell.attr('text/text') !== undefined) {
+                    editingCell.attr('text/text', newText);
+                } else if (editingCell.attr('body/text') !== undefined) {
+                    editingCell.attr('body/text', newText);
+                } else {
+                    editingCell.attr('label/text', newText); // Fallback
+                }
+
+                if (commandManager) commandManager.stopBatch();
             }
-            input.remove();
+
+            activeInput.remove();
             activeInput = null;
+            editingCell = null;
         };
 
-        input.addEventListener('blur', finishEdit);
+        // Event listeners
+        input.addEventListener('blur', () => commitEdit(false));
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') input.blur();
-            if (e.key === 'Escape') {
-                input.value = currentText; // Restore original
+            e.stopPropagation(); // Stop diagram from catching key events (like backspace deleting the element)
+            if (e.key === 'Enter') {
                 input.blur();
             }
+            if (e.key === 'Escape') {
+                commitEdit(true); // Revert
+            }
         });
+
+        // Mousedown inside the input must not drag the canvas
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
     };
 
     paper.on('element:pointerdblclick', onElementDblClick);
@@ -540,6 +611,11 @@ const TOOLBAR_BUTTONS: ToolbarButton[] = [
         title: 'Delete',
         svg: `<svg viewBox="0 0 16 16" width="14" height="14"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
     },
+    {
+        id: 'settings',
+        title: 'Settings',
+        svg: `<svg viewBox="0 0 16 16" width="14" height="14"><path d="M7 0h2v2c1.1.2 2 .7 2.8 1.4l1.4-1.4 1.4 1.4-1.4 1.4C13.8 5.6 14 6.3 14 7h2v2h-2c-.2.9-.6 1.7-1.2 2.3l1.4 1.4-1.4 1.4-1.4-1.4c-.6.6-1.4 1.1-2.3 1.2v2H7v-2c-.9-.2-1.7-.7-2.3-1.2l-1.4 1.4-1.4-1.4 1.4-1.4C2.7 10.7 2.2 9.9 2 9H0V7h2c.2-.9.7-1.7 1.4-2.3L2 3.3 3.4 1.9l1.4 1.4C5.4 2.6 6.1 2.2 7 2V0zm1 11c1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3 1.3 3 3 3z" fill="currentColor"/></svg>`,
+    },
 ];
 
 /**
@@ -562,6 +638,7 @@ export function setupResizeRotate(
     paper: dia.Paper,
     graph: dia.Graph,
     onSelectionChange: SelectionCallback,
+    commandManager?: UndoRedoManager,
 ): () => void {
     // ── State ───────────────────────────────────────────────
     let overlayGroup: SVGGElement | null = null;
@@ -832,6 +909,14 @@ export function setupResizeRotate(
                 onSelectionChange([]);
                 break;
             }
+            case 'settings': {
+                const targetElement = activeElement;
+                cleanupAll();
+                if (targetElement) {
+                    paper.trigger('element:configure', targetElement);
+                }
+                break;
+            }
         }
     };
 
@@ -963,6 +1048,10 @@ export function setupResizeRotate(
             origBBox = { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
         }
 
+        if (commandManager) {
+            commandManager.startBatch(handleType === 'rotate' ? 'rotate' : 'resize');
+        }
+
         el.style.cursor = handleType === 'rotate' ? 'grabbing' : (target.getAttribute('cursor') || 'default');
     };
 
@@ -1050,6 +1139,7 @@ export function setupResizeRotate(
             batchStarted = false;
             el.style.cursor = '';
             updateHandlePositions();
+            if (commandManager) commandManager.stopBatch();
         }
     };
 
@@ -1180,3 +1270,83 @@ export function setupKeyboardShortcuts(handlers: {
         document.removeEventListener('keydown', onKeyDown);
     };
 }
+
+// ============================================================
+// MULTI-SELECTION CONCURRENT DRAGGING
+// ============================================================
+
+/**
+ * Allows multiple selected elements to be moved together seamlessly.
+ * When one element in the selection is dragged, the others translate identically.
+ * 
+ * @param paper The dia.Paper instance
+ * @param graph The dia.Graph instance
+ * @param getSelected Function to return the current array of selected cells
+ * @returns Cleanup function
+ */
+export function setupMultiSelectionMove(
+    paper: dia.Paper,
+    graph: dia.Graph,
+    getSelected: () => dia.Cell[],
+    commandManager?: UndoRedoManager,
+): () => void {
+    let isDragging = false;
+    let dragElementId: string | null = null;
+    let lastPos: g.Point | null = null;
+
+    const onPointerDown = (elementView: dia.ElementView) => {
+        const model = elementView.model;
+        const selected = getSelected();
+
+        // Only activate if we grab an item that is ALREADY part of a multi-selection
+        if (selected.length > 1 && selected.some((c) => c.id === model.id)) {
+            isDragging = true;
+            dragElementId = model.id as string;
+            lastPos = model.position();
+            graph.startBatch('multi-move');
+            if (commandManager) commandManager.startBatch('multi-move');
+        }
+    };
+
+    const onPointerMove = (elementView: dia.ElementView) => {
+        if (!isDragging || elementView.model.id !== dragElementId || !lastPos) return;
+
+        const currentPos = elementView.model.position();
+        const dx = currentPos.x - lastPos.x;
+        const dy = currentPos.y - lastPos.y;
+
+        if (dx === 0 && dy === 0) return;
+
+        // Apply this exact relative delta to all OTHER selected elements simultaneously
+        const selected = getSelected();
+        selected.forEach((cell) => {
+            if (cell.id !== dragElementId && cell.isElement()) {
+                (cell as dia.Element).translate(dx, dy);
+            }
+        });
+
+        // Update lastPos for the next tick
+        lastPos = currentPos;
+    };
+
+    const onPointerUp = (elementView: dia.ElementView) => {
+        if (isDragging && elementView.model.id === dragElementId) {
+            isDragging = false;
+            dragElementId = null;
+            lastPos = null;
+            graph.stopBatch('multi-move');
+            if (commandManager) commandManager.stopBatch();
+        }
+    };
+
+    paper.on('element:pointerdown', onPointerDown);
+    paper.on('element:pointermove', onPointerMove);
+    paper.on('element:pointerup', onPointerUp);
+
+    return () => {
+        paper.off('element:pointerdown', onPointerDown);
+        paper.off('element:pointermove', onPointerMove);
+        paper.off('element:pointerup', onPointerUp);
+    };
+}
+

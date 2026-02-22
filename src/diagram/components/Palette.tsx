@@ -1,430 +1,186 @@
-/**
- * Palette.tsx
- * 
- * Left sidebar with draggable BPMN 2.0 shape items.
- * Users drag shapes from the palette and drop them onto the canvas.
- * 
- * Uses HTML5 Drag & Drop API:
- * - dragstart sets transfer data with shape type/label
- * - Canvas onDrop handler reads the data and creates the element
- * 
- * BPM Categories:
- * - Events: Start, End, Intermediate
- * - Activities: Task, Sub-Process, Call Activity
- * - Gateways: Exclusive, Parallel, Inclusive
- * - Data: Data Object, Data Store
- */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import styled from 'styled-components';
-import { useDiagram, DiagramType } from '../context/DiagramProvider';
+import { useDiagram } from '../context/DiagramProvider';
 
 // ============================================================
 // STYLED COMPONENTS
 // ============================================================
 
-const PaletteContainer = styled.div`
-  width: 220px;
+const FloatingToolbarContainer = styled.div`
   display: flex;
   flex-direction: column;
-  background: ${({ theme }) => theme.glass.background};
-  border-right: ${({ theme }) => theme.glass.border};
-  backdrop-filter: ${({ theme }) => theme.glass.backdropFilter};
-  padding: ${({ theme }) => theme.spacing.md};
-  overflow-y: auto;
-  z-index: ${({ theme }) => theme.zIndex.panels};
+  background: ${({ theme }) => theme.colors.bg.secondary};
+  border: 1px solid ${({ theme }) => theme.colors.border.subtle};
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  padding: 8px 4px;
+  gap: 8px;
+  color: ${({ theme }) => theme.colors.text.secondary};
 `;
 
-const PaletteTitle = styled.h3`
-  font-size: ${({ theme }) => theme.typography.sizes.sm};
-  font-weight: ${({ theme }) => theme.typography.weights.semibold};
-  color: ${({ theme }) => theme.colors.text.tertiary};
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: ${({ theme }) => theme.spacing.md};
-`;
-
-const CategoryHeader = styled.button<{ $expanded: boolean }>`
+const ToolButton = styled.button<{ $active?: boolean }>`
+  width: 36px;
+  height: 36px;
+  background: ${({ theme, $active }) => ($active ? theme.colors.bg.canvas : 'transparent')};
+  border: none;
+  border-radius: 6px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 8px 6px;
-  background: none;
-  border: none;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.border.subtle};
-  color: ${({ theme }) => theme.colors.text.secondary};
-  font-size: ${({ theme }) => theme.typography.sizes.xs};
-  font-weight: ${({ theme }) => theme.typography.weights.semibold};
-  font-family: ${({ theme }) => theme.typography.fontFamily};
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  justify-content: center;
   cursor: pointer;
-  transition: color ${({ theme }) => theme.transitions.fast};
+  color: ${({ theme, $active }) => ($active ? theme.colors.accent.primary : 'inherit')};
+  transition: all 0.2s;
 
   &:hover {
+    background: ${({ theme }) => theme.colors.bg.canvas};
     color: ${({ theme }) => theme.colors.text.primary};
   }
 
-  &::after {
-    content: '${({ $expanded }) => ($expanded ? '▾' : '▸')}';
-    font-size: 10px;
+  svg {
+    width: 20px;
+    height: 20px;
   }
 `;
 
-const CategoryItems = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: ${({ theme }) => theme.spacing.sm};
-  padding: ${({ theme }) => theme.spacing.sm} 0;
+const Divider = styled.div`
+  height: 1px;
+  background: ${({ theme }) => theme.colors.border.subtle};
+  margin: 4px 8px;
 `;
 
-const ShapeItem = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: ${({ theme }) => theme.spacing.md};
-  border-radius: ${({ theme }) => theme.radius.md};
-  background: ${({ theme }) => theme.colors.bg.tertiary};
-  border: 1px solid ${({ theme }) => theme.colors.border.subtle};
-  cursor: grab;
-  transition: all ${({ theme }) => theme.transitions.fast};
-  user-select: none;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.bg.elevated};
-    border-color: ${({ theme }) => theme.colors.accent.primary};
-    transform: translateY(-2px);
-    box-shadow: ${({ theme }) => theme.shadows.sm};
-  }
-
-  &:active {
-    cursor: grabbing;
-    transform: scale(0.95);
-  }
-`;
-
-const ShapePreviewSVG = styled.svg`
+const DraggableShape = styled.div`
   width: 36px;
   height: 36px;
-  overflow: visible;
-`;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: inherit;
 
-const ShapeLabel = styled.span`
-  font-size: ${({ theme }) => theme.typography.sizes.xs};
-  color: ${({ theme }) => theme.colors.text.secondary};
-  text-align: center;
-  line-height: 1.2;
-`;
-
-// ============================================================
-// BPM SHAPE DEFINITIONS
-// ============================================================
-
-interface BPMShape {
-  type: string;
-  label: string;
-  category: string;
-}
-
-interface BPMCategory {
-  name: string;
-  shapes: BPMShape[];
-}
-
-const PALETTE_DEFINITIONS: Record<DiagramType, BPMCategory[]> = {
-  BPMN: [
-    {
-      name: 'Events',
-      shapes: [
-        { type: 'startEvent', label: 'Start Event', category: 'Events' },
-        { type: 'endEvent', label: 'End Event', category: 'Events' },
-        { type: 'intermediateEvent', label: 'Intermediate', category: 'Events' },
-      ],
-    },
-    {
-      name: 'Activities',
-      shapes: [
-        { type: 'task', label: 'Task', category: 'Activities' },
-        { type: 'subProcess', label: 'Sub-Process', category: 'Activities' },
-        { type: 'callActivity', label: 'Call Activity', category: 'Activities' },
-      ],
-    },
-    {
-      name: 'Gateways',
-      shapes: [
-        { type: 'exclusiveGateway', label: 'Exclusive', category: 'Gateways' },
-        { type: 'parallelGateway', label: 'Parallel', category: 'Gateways' },
-        { type: 'inclusiveGateway', label: 'Inclusive', category: 'Gateways' },
-      ],
-    },
-    {
-      name: 'Data',
-      shapes: [
-        { type: 'dataObject', label: 'Data Object', category: 'Data' },
-        { type: 'dataStore', label: 'Data Store', category: 'Data' },
-      ],
-    },
-  ],
-  'Business Object': [
-    {
-      name: 'Structure',
-      shapes: [
-        { type: 'businessObject', label: 'Object', category: 'Structure' },
-        { type: 'businessAttribute', label: 'Attribute', category: 'Structure' },
-        { type: 'businessMethod', label: 'Method', category: 'Structure' },
-      ],
-    },
-  ],
-  Organization: [
-    {
-      name: 'Structure',
-      shapes: [
-        { type: 'orgUnit', label: 'Org Unit', category: 'Structure' },
-        { type: 'orgRole', label: 'Role', category: 'Structure' },
-        { type: 'orgPerson', label: 'Person', category: 'Structure' },
-        { type: 'orgLocation', label: 'Location', category: 'Structure' },
-      ],
-    },
-  ],
-  System: [
-    {
-      name: 'Architecture',
-      shapes: [
-        { type: 'sysITSystem', label: 'IT System', category: 'Architecture' },
-        { type: 'sysDatabase', label: 'Database', category: 'Architecture' },
-        { type: 'sysCluster', label: 'Cluster', category: 'Architecture' },
-      ],
-    },
-  ],
-  'Technical Workflow': [
-    {
-      name: 'Adapters',
-      shapes: [
-        { type: 'techDataConverter', label: 'Data Converter', category: 'Adapters' },
-        { type: 'techFormatAdapter', label: 'Format Adapter', category: 'Adapters' },
-        { type: 'techSystemConnector', label: 'Sys Connector', category: 'Adapters' },
-      ],
-    },
-    {
-      name: 'Routing',
-      shapes: [
-        { type: 'exclusiveGateway', label: 'Exclusive', category: 'Routing' },
-        { type: 'parallelGateway', label: 'Parallel', category: 'Routing' },
-      ],
-    },
-  ],
-};
-
-// ============================================================
-// SVG PREVIEW RENDERERS
-// ============================================================
-
-function ShapePreview({ type }: { type: string }) {
-  switch (type) {
-    // Events — circles
-    case 'startEvent':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <circle cx="18" cy="18" r="14" fill="none" stroke="#2DD4A8" strokeWidth="2" />
-        </ShapePreviewSVG>
-      );
-    case 'endEvent':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <circle cx="18" cy="18" r="14" fill="none" stroke="#FF5C5C" strokeWidth="3.5" />
-        </ShapePreviewSVG>
-      );
-    case 'intermediateEvent':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <circle cx="18" cy="18" r="14" fill="none" stroke="#FFB224" strokeWidth="2" />
-          <circle cx="18" cy="18" r="11" fill="none" stroke="#FFB224" strokeWidth="1" />
-        </ShapePreviewSVG>
-      );
-
-    // Activities — rounded rectangles
-    case 'task':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="2" y="6" width="32" height="24" rx="4" fill="none" stroke="#9B9BA4" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-    case 'subProcess':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="2" y="6" width="32" height="24" rx="4" fill="none" stroke="#9B9BA4" strokeWidth="1.5" />
-          <rect x="14" y="26" width="8" height="8" rx="1" fill="none" stroke="#9B9BA4" strokeWidth="1" />
-          <line x1="18" y1="28" x2="18" y2="32" stroke="#9B9BA4" strokeWidth="1" />
-          <line x1="16" y1="30" x2="20" y2="30" stroke="#9B9BA4" strokeWidth="1" />
-        </ShapePreviewSVG>
-      );
-    case 'callActivity':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="2" y="6" width="32" height="24" rx="4" fill="none" stroke="#9B9BA4" strokeWidth="3" />
-        </ShapePreviewSVG>
-      );
-
-    // Gateways — diamonds
-    case 'exclusiveGateway':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <polygon points="18,2 34,18 18,34 2,18" fill="none" stroke="#FFB224" strokeWidth="1.5" />
-          <text x="18" y="22" textAnchor="middle" fill="#FFB224" fontSize="14" fontWeight="bold">✕</text>
-        </ShapePreviewSVG>
-      );
-    case 'parallelGateway':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <polygon points="18,2 34,18 18,34 2,18" fill="none" stroke="#FFB224" strokeWidth="1.5" />
-          <text x="18" y="23" textAnchor="middle" fill="#FFB224" fontSize="18" fontWeight="bold">+</text>
-        </ShapePreviewSVG>
-      );
-    case 'inclusiveGateway':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <polygon points="18,2 34,18 18,34 2,18" fill="none" stroke="#FFB224" strokeWidth="1.5" />
-          <circle cx="18" cy="18" r="6" fill="none" stroke="#FFB224" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-
-    // Data
-    case 'dataObject':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <path d="M6,2 L24,2 L30,8 L30,34 L6,34 Z" fill="none" stroke="#9B9BA4" strokeWidth="1.5" />
-          <path d="M24,2 L24,8 L30,8" fill="none" stroke="#9B9BA4" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-    case 'dataStore':
-    case 'sysDatabase':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <ellipse cx="18" cy="8" rx="14" ry="5" fill="none" stroke="#9B9BA4" strokeWidth="1.5" />
-          <line x1="4" y1="8" x2="4" y2="28" stroke="#9B9BA4" strokeWidth="1.5" />
-          <line x1="32" y1="8" x2="32" y2="28" stroke="#9B9BA4" strokeWidth="1.5" />
-          <ellipse cx="18" cy="28" rx="14" ry="5" fill="none" stroke="#9B9BA4" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-
-    // Business Object
-    case 'businessObject':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="2" y="4" width="32" height="28" fill="none" stroke="#4A90E2" strokeWidth="1.5" />
-          <line x1="2" y1="12" x2="34" y2="12" stroke="#4A90E2" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-    case 'businessAttribute':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <circle cx="10" cy="18" r="3" fill="#4A90E2" />
-          <line x1="16" y1="18" x2="30" y2="18" stroke="#4A90E2" strokeWidth="1.5" strokeDasharray="2,2" />
-        </ShapePreviewSVG>
-      );
-
-    // Organization
-    case 'orgUnit':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="2" y="8" width="32" height="20" rx="2" fill="none" stroke="#F5A623" strokeWidth="1.5" />
-          <line x1="2" y1="16" x2="34" y2="16" stroke="#F5A623" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-    case 'orgPerson':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <circle cx="18" cy="12" r="6" fill="none" stroke="#F5A623" strokeWidth="1.5" />
-          <path d="M6,32 C6,22 30,22 30,32" fill="none" stroke="#F5A623" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-
-    // System/Technical
-    case 'sysITSystem':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="4" y="4" width="28" height="28" fill="none" stroke="#7ED321" strokeWidth="1.5" />
-          <rect x="8" y="8" width="20" height="20" fill="none" stroke="#7ED321" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-    case 'techDataConverter':
-    case 'techFormatAdapter':
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <polygon points="2,18 10,6 26,6 34,18 26,30 10,30" fill="none" stroke="#BD10E0" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
-
-    default:
-      return (
-        <ShapePreviewSVG viewBox="0 0 36 36">
-          <rect x="4" y="4" width="28" height="28" rx="4" fill="none" stroke="#6B6B76" strokeWidth="1.5" />
-        </ShapePreviewSVG>
-      );
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.canvas};
+    color: ${({ theme }) => theme.colors.text.primary};
   }
-}
+  
+  &:active {
+    cursor: grabbing;
+  }
+
+  svg {
+    width: 20px;
+    height: 20px;
+    pointer-events: none;
+  }
+`;
 
 // ============================================================
 // COMPONENT
 // ============================================================
 
 export default function Palette() {
-  const { diagramType } = useDiagram();
-  
-  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const { paper, diagramType, interactionMode, setInteractionMode } = useDiagram();
 
-  // Reset expanded categories when diagramType changes
-  useEffect(() => {
-    const categories = PALETTE_DEFINITIONS[diagramType] || [];
-    const initial: Record<string, boolean> = {};
-    categories.forEach((c) => { initial[c.name] = true; });
-    setExpandedCategories(initial);
-  }, [diagramType]);
-
-  const toggleCategory = (name: string) => {
-    setExpandedCategories((prev) => ({ ...prev, [name]: !prev[name] }));
-  };
-
-  const onDragStart = (e: React.DragEvent, shape: BPMShape) => {
+  const onDragStart = (e: React.DragEvent, shapeType: string, label: string) => {
     e.dataTransfer.setData(
       'application/diagram-node',
-      JSON.stringify({ type: shape.type, label: shape.label }),
+      JSON.stringify({ type: shapeType, label })
     );
     e.dataTransfer.effectAllowed = 'copy';
   };
 
-  const activeCategories = PALETTE_DEFINITIONS[diagramType] || [];
-
   return (
-    <PaletteContainer>
-      <PaletteTitle>{diagramType} Elements</PaletteTitle>
-      {activeCategories.map((category) => (
-        <div key={category.name}>
-          <CategoryHeader
-            $expanded={!!expandedCategories[category.name]}
-            onClick={() => toggleCategory(category.name)}
-          >
-            {category.name}
-          </CategoryHeader>
-          {expandedCategories[category.name] && (
-            <CategoryItems>
-              {category.shapes.map((shape) => (
-                <ShapeItem
-                  key={shape.type}
-                  draggable
-                  onDragStart={(e) => onDragStart(e, shape)}
-                >
-                  <ShapePreview type={shape.type} />
-                  <ShapeLabel>{shape.label}</ShapeLabel>
-                </ShapeItem>
-              ))}
-            </CategoryItems>
-          )}
-        </div>
-      ))}
-    </PaletteContainer>
+    <FloatingToolbarContainer>
+      {/* Pointer tool */}
+      <ToolButton 
+        $active={interactionMode === 'pointer'} 
+        title="Select"
+        onClick={() => setInteractionMode('pointer')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+      </ToolButton>
+
+      {/* Hand tool */}
+      <ToolButton 
+        $active={interactionMode === 'pan'} 
+        title="Pan"
+        onClick={() => setInteractionMode('pan')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0a2 2 0 0 0-2 2v0a2 2 0 0 0-2 2v5"/><path d="M14 11V6.5a2.5 2.5 0 0 0-5 0v7"/><path d="M9 13v-3a2 2 0 0 0-4 0v9a6 6 0 0 0 6-6h2a6 6 0 0 0 6-6v-5"/></svg>
+      </ToolButton>
+
+      {/* Comment tool */}
+      <ToolButton title="Comment">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      </ToolButton>
+
+      <Divider />
+
+      {/* Draggable Shapes */}
+      
+      {/* Task / Box */}
+      <DraggableShape
+        title="Task"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'task', 'Task')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+        </svg>
+      </DraggableShape>
+
+      {/* Event / Circle */}
+      <DraggableShape
+        title="Event"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'startEvent', 'Event')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      </DraggableShape>
+
+      {/* Gateway / Diamond */}
+      <DraggableShape
+        title="Gateway"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'exclusiveGateway', 'Gateway')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="12 3 21 12 12 21 3 12 12 3" />
+        </svg>
+      </DraggableShape>
+
+      {/* Data Object */}
+      <DraggableShape
+        title="Data Object"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'dataObject', 'Data')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+        </svg>
+      </DraggableShape>
+
+      <Divider />
+
+      {/* Fit Content Action */}
+      <ToolButton 
+        title="Fit Content"
+        onClick={() => paper?.scaleContentToFit({ padding: 60, maxScale: 1.5, minScale: 0.3 })}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M7 12h10M12 7v10"/></svg>
+      </ToolButton>
+
+      <Divider />
+
+      <ToolButton title="More Shapes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </ToolButton>
+
+    </FloatingToolbarContainer>
   );
 }

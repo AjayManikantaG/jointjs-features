@@ -5,7 +5,7 @@
  * into a FigJam-like layout:
  * 
  *  ┌──────────┬─────────────────────┬────────────┐
- *  │          │     Toolbar          │            │
+ *  │          │     Toolbar         │            │
  *  │  Palette │─────────────────────│  Property  │
  *  │          │                     │   Panel    │
  *  │          │      Canvas         │            │
@@ -19,57 +19,39 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { dia } from '@joint/core';
 import styled, { ThemeProvider } from 'styled-components';
 import { theme } from '@/styles/theme';
 import { GlobalStyles } from '@/styles/GlobalStyles';
 import { DiagramProvider } from '@/diagram/context/DiagramProvider';
 import Canvas from '@/diagram/components/Canvas';
-import Toolbar from '@/diagram/components/Toolbar';
 import Palette from '@/diagram/components/Palette';
-import Minimap from '@/diagram/components/Minimap';
-import PropertyPanel from '@/diagram/components/PropertyPanel';
 import ContextMenu from '@/diagram/components/ContextMenu';
 import Tooltip from '@/diagram/components/Tooltip';
 import WorkbenchLayout from '@/diagram/components/WorkbenchLayout';
+import ConfigModal from '@/diagram/components/ConfigModal';
+import Minimap from '@/diagram/components/Minimap';
 import type { ContextMenuEvent, TooltipEvent } from '@/diagram/engine/interactions';
 
 // ============================================================
 // LAYOUT STYLED COMPONENTS
 // ============================================================
 
-const AppShell = styled.div`
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-  background: ${({ theme }) => theme.colors.bg.primary};
-`;
-
-const CenterColumn = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-`;
-
-const ToolbarRow = styled.div`
-  display: flex;
-  justify-content: center;
-  padding: ${({ theme }) => theme.spacing.sm};
+const CanvasContainer = styled.div`
   position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: ${({ theme }) => theme.zIndex.toolbar};
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 `;
 
-const MinimapWrapper = styled.div`
+const VerticalToolbarWrapper = styled.div`
   position: absolute;
-  bottom: 16px;
+  top: 16px;
   right: 16px;
   z-index: ${({ theme }) => theme.zIndex.panels};
 `;
+
 
 // ============================================================
 // COMPONENT
@@ -79,6 +61,7 @@ export default function DiagramApp() {
   // Context menu state
   const [contextMenuEvent, setContextMenuEvent] = useState<ContextMenuEvent | null>(null);
   const [tooltipEvent, setTooltipEvent] = useState<TooltipEvent | null>(null);
+  const [configuringCell, setConfiguringCell] = useState<dia.Cell | null>(null);
 
   const handleContextMenu = useCallback((event: ContextMenuEvent) => {
     setContextMenuEvent(event);
@@ -97,34 +80,23 @@ export default function DiagramApp() {
   }, []);
 
   const designerContent = (
-    <AppShell>
-      {/* Left: Shape palette */}
-      <Palette />
+    <CanvasContainer>
+      <Canvas
+        onContextMenu={handleContextMenu}
+        onTooltipShow={handleTooltipShow}
+        onTooltipHide={handleTooltipHide}
+        onConfigure={setConfiguringCell}
+      />
 
-      {/* Center: Canvas + Toolbar + Minimap */}
-      <CenterColumn>
-        <ToolbarRow>
-          <Toolbar />
-        </ToolbarRow>
-
-        <Canvas
-          onContextMenu={handleContextMenu}
-          onTooltipShow={handleTooltipShow}
-          onTooltipHide={handleTooltipHide}
-        />
-
-        <MinimapWrapper>
-          <Minimap />
-        </MinimapWrapper>
-      </CenterColumn>
-
-      {/* Right: Property panel */}
-      <PropertyPanel />
+      <VerticalToolbarWrapper>
+        <Palette />
+      </VerticalToolbarWrapper>
 
       {/* Floating overlays */}
       <ContextMenu event={contextMenuEvent} onClose={handleCloseContextMenu} />
       <Tooltip event={tooltipEvent} />
-    </AppShell>
+      {configuringCell && <ConfigModal cell={configuringCell} onClose={() => setConfiguringCell(null)} />}
+    </CanvasContainer>
   );
 
   const repositoryContent = (
@@ -140,7 +112,8 @@ export default function DiagramApp() {
       <DiagramProvider>
         <WorkbenchLayout 
           designerContent={designerContent} 
-          repositoryContent={repositoryContent} 
+          repositoryContent={repositoryContent}
+          minimapContent={<Minimap />}
         />
       </DiagramProvider>
     </ThemeProvider>
