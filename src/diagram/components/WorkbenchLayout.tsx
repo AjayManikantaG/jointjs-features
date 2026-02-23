@@ -287,7 +287,6 @@ const StatusItem = styled.div`
   gap: 4px;
 `;
 
-// ---------- RIGHT SIDEBAR (COMMENTS) ----------
 
 // ============================================================
 // COMPONENT
@@ -302,50 +301,6 @@ interface WorkbenchLayoutProps {
 export default function WorkbenchLayout({ designerContent, repositoryContent, minimapContent }: WorkbenchLayoutProps) {
   const [activeMainTab, setActiveMainTab] = useState<'designer' | 'editor' | 'repository' | 'monitoring' | 'logfiles' | 'admin'>('editor');
   const [isConnectionManagerOpen, setIsConnectionManagerOpen] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(100);
-  const { paper } = useDiagram();
-
-  useEffect(() => {
-    if (!paper) return;
-    const updateZoom = () => setZoomLevel(Math.round(paper.scale().sx * 100));
-    paper.on('scale', updateZoom);
-    return () => { paper.off('scale', updateZoom); };
-  }, [paper]);
-
-  const zoomToCenter = (newScale: number) => {
-    if (!paper) return;
-    const elRect = (paper.el as HTMLElement).getBoundingClientRect();
-    const cx = elRect.width / 2;
-    const cy = elRect.height / 2;
-    const currentScale = paper.scale().sx;
-    const currentTranslate = paper.translate();
-    const factor = newScale / currentScale;
-    const newTx = cx - factor * (cx - currentTranslate.tx);
-    const newTy = cy - factor * (cy - currentTranslate.ty);
-    paper.scale(newScale, newScale);
-    paper.translate(newTx, newTy);
-  };
-
-  const handleZoomIn = () => {
-    if (!paper) return;
-    const currentScale = paper.scale().sx;
-    zoomToCenter(Math.min(currentScale + 0.2, 5));
-  };
-
-  const handleZoomOut = () => {
-    if (!paper) return;
-    const currentScale = paper.scale().sx;
-    zoomToCenter(Math.max(currentScale - 0.2, 0.2));
-  };
-  
-  const handleZoomOriginal = () => {
-      zoomToCenter(1.0);
-  };
-
-  const handleZoomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newScale = parseInt(e.target.value, 10) / 100;
-    zoomToCenter(newScale);
-  };
 
   return (
     <LayoutContainer>
@@ -355,7 +310,7 @@ export default function WorkbenchLayout({ designerContent, repositoryContent, mi
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D3A33A" strokeWidth="2">
               <path d="M12 2L2 22h20L12 2z" />
             </svg>
-            <span><LogoHighlight>W VIRTIMO</LogoHighlight> INUBIT</span>
+            <span><LogoHighlight>JointJS</LogoHighlight> POC</span>
           </LogoContainer>
           <PathBreadcrumb>
             Flow 02 &gt; <b>Flow 01</b>
@@ -470,14 +425,11 @@ export default function WorkbenchLayout({ designerContent, repositoryContent, mi
               <StatusItem><span>Mode:</span> <b>Editor</b></StatusItem>
             </StatusGroup>
             <StatusGroup>
-              <NavIconBtn onClick={handleZoomOut}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/></svg></NavIconBtn>
-              <input type="range" min="20" max="500" value={zoomLevel} onChange={handleZoomChange} style={{ width: '100px', cursor: 'pointer' }} />
-              <NavIconBtn onClick={handleZoomIn}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></NavIconBtn>
-              <span style={{ minWidth: '40px', textAlign: 'right' }}>{zoomLevel} %</span>
-              <NavIconBtn onClick={handleZoomOriginal} style={{ marginLeft: '12px' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></NavIconBtn>
+              {/* Zoom controls moved to TopToolbar */}
             </StatusGroup>
           </StatusBar>
         </CenterArea>
+
 
 
 

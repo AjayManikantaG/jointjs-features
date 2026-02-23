@@ -2,13 +2,13 @@
  * clipboard.ts
  *
  * Implements Copy/Paste functionality for JointJS elements.
- * Emulates the commercial JointJS+ Clipboard feature.
+ * Uses direct cell JSON serialization for maximum compatibility.
  */
 import { dia } from '@joint/core';
 
 export class ClipboardManager {
     private graph: dia.Graph;
-    private clipboard: dia.Cell[] = [];
+    private clipboard: Record<string, unknown>[] = [];
     private pasteOffset = 40;
     private currentPasteCount = 0;
 
@@ -18,31 +18,32 @@ export class ClipboardManager {
 
     /**
      * Copies the given cells to the internal clipboard.
-     * Uses JointJS graph.cloneSubgraph to maintain links between copied elements properly.
+     * Stores cell JSON for reliable cloning across shape types.
      */
     copy(cells: dia.Cell[]): void {
         if (!cells || cells.length === 0) return;
 
-        // Clone the cells right away to get a snapshot
-        // We clone the subgraph to preserve links that connect two copied elements
-        const clones = this.graph.cloneSubgraph(cells);
+        // Store JSON snapshots of each cell
+        this.clipboard = cells.map(cell => cell.toJSON());
+        this.currentPasteCount = 0;
+    }
 
-        // Filter out links that were not fully copied (where source or target is missing)
-        // because cloneSubgraph might include dangling links in some versions
-        this.clipboard = Object.values(clones).filter(cell => {
-            if (cell.isLink()) {
-                const link = cell as dia.Link;
-                const src = link.source() as { id?: string };
-                const tgt = link.target() as { id?: string };
-                // Keep link only if both source and target are also in the clipboard clones
-                // cloneSubgraph usually handles this but it's safe to check.
-                if (src.id && !clones[src.id]) return false;
-                if (tgt.id && !clones[tgt.id]) return false;
-            }
-            return true;
-        });
+    /**
+     * Cuts the given cells — copies them to clipboard and removes from graph.
+     */
+    cut(cells: dia.Cell[]): void {
+        if (!cells || cells.length === 0) return;
+        this.copy(cells);
+        this.graph.startBatch('cut');
+        cells.forEach(cell => cell.remove());
+        this.graph.stopBatch('cut');
+    }
 
-        this.currentPasteCount = 0; // Reset paste offset counter
+    /**
+     * Checks if the clipboard has content.
+     */
+    hasContent(): boolean {
+        return this.clipboard.length > 0;
     }
 
     /**
@@ -52,29 +53,38 @@ export class ClipboardManager {
         if (this.clipboard.length === 0) return [];
 
         this.currentPasteCount++;
-        const totalOffset = this.pasteOffset * this.currentPasteCount;
+        const offset = this.pasteOffset * this.currentPasteCount;
 
-        // Clone the clipboard contents for insertion
-        const clonesToInsertMap = this.graph.cloneSubgraph(this.clipboard);
-        const clonesToInsert = Object.values(clonesToInsertMap);
+        this.graph.startBatch('paste');
 
-        // Apply offset translation only to elements (links auto-update if attached)
-        clonesToInsert.forEach(cell => {
-            if (cell.isElement()) {
-                const element = cell as dia.Element;
-                element.translate(this.pasteOffset, this.pasteOffset);
+        const pastedCells: dia.Cell[] = [];
+
+        this.clipboard.forEach(cellJSON => {
+            // Deep clone the JSON to avoid mutation
+            const clonedJSON = JSON.parse(JSON.stringify(cellJSON));
+
+            // Generate a new unique ID so it doesn't conflict
+            delete clonedJSON.id;
+
+            // Offset position for elements
+            if (clonedJSON.position) {
+                clonedJSON.position.x = (clonedJSON.position.x || 0) + offset;
+                clonedJSON.position.y = (clonedJSON.position.y || 0) + offset;
+            }
+
+            // Add to graph — JointJS will auto-assign a new id
+            const cell = this.graph.addCell(clonedJSON);
+            if (cell) {
+                // addCell returns the graph, we need to find the added cell
+                const cells = this.graph.getCells();
+                const lastCell = cells[cells.length - 1];
+                if (lastCell) pastedCells.push(lastCell);
             }
         });
 
-        // Insert into graph as a batch for undo/redo
-        this.graph.startBatch('paste');
-        this.graph.addCells(clonesToInsert);
         this.graph.stopBatch('paste');
 
-        // We update the clipboard to these new clones so the next paste offsets from them
-        this.clipboard = clonesToInsert;
-
-        return clonesToInsert;
+        return pastedCells;
     }
 
     /**

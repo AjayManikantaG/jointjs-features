@@ -61,6 +61,8 @@ interface DiagramContextValue {
   selectAll: () => void;
   /** Copy selected cells */
   copy: () => void;
+  /** Cut selected cells */
+  cut: () => void;
   /** Paste cells from clipboard */
   paste: () => void;
   /** Clear the selection */
@@ -107,6 +109,8 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
 
   const [paper, setPaperState] = useState<dia.Paper | null>(null);
   const [selectedCells, setSelectedCells] = useState<dia.Cell[]>([]);
+  const selectedCellsRef = useRef<dia.Cell[]>([]);
+  selectedCellsRef.current = selectedCells;
   const [diagramType, setDiagramType] = useState<DiagramType>('BPMN');
   const [interactionMode, setInteractionMode] = useState<InteractionMode>('pointer');
   const [canUndo, setCanUndo] = useState(false);
@@ -189,10 +193,19 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
   }, [graph]);
 
   const copy = useCallback(() => {
-    if (selectedCells.length > 0) {
-      clipboardManager.copy(selectedCells);
+    const cells = selectedCellsRef.current;
+    if (cells.length > 0) {
+      clipboardManager.copy(cells);
     }
-  }, [clipboardManager, selectedCells]);
+  }, [clipboardManager]);
+
+  const cut = useCallback(() => {
+    const cells = selectedCellsRef.current;
+    if (cells.length > 0) {
+      clipboardManager.cut(cells);
+      setSelectedCells([]);
+    }
+  }, [clipboardManager]);
 
   const paste = useCallback(() => {
     const pastedCells = clipboardManager.paste();
@@ -221,6 +234,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
     deleteSelected,
     selectAll,
     copy,
+    cut,
     paste,
     clearSelection,
     canUndo,

@@ -23,7 +23,7 @@ import { dia } from '@joint/core';
 import styled, { ThemeProvider } from 'styled-components';
 import { theme } from '@/styles/theme';
 import { GlobalStyles } from '@/styles/GlobalStyles';
-import { DiagramProvider } from '@/diagram/context/DiagramProvider';
+import { DiagramProvider, useDiagram } from '@/diagram/context/DiagramProvider';
 import Canvas from '@/diagram/components/Canvas';
 import Palette from '@/diagram/components/Palette';
 import ContextMenu from '@/diagram/components/ContextMenu';
@@ -31,6 +31,7 @@ import Tooltip from '@/diagram/components/Tooltip';
 import WorkbenchLayout from '@/diagram/components/WorkbenchLayout';
 import ConfigModal from '@/diagram/components/ConfigModal';
 import Minimap from '@/diagram/components/Minimap';
+import TopToolbar from '@/diagram/components/TopToolbar';
 import type { ContextMenuEvent, TooltipEvent } from '@/diagram/engine/interactions';
 
 // ============================================================
@@ -88,6 +89,8 @@ export default function DiagramApp() {
         onConfigure={setConfiguringCell}
       />
 
+      <TopToolbar />
+
       <VerticalToolbarWrapper>
         <Palette />
       </VerticalToolbarWrapper>
@@ -110,12 +113,43 @@ export default function DiagramApp() {
     <ThemeProvider theme={theme}>
       <GlobalStyles />
       <DiagramProvider>
-        <WorkbenchLayout 
-          designerContent={designerContent} 
+        <DiagramAppContent 
+          designerContent={designerContent}
           repositoryContent={repositoryContent}
-          minimapContent={<Minimap />}
+          setConfiguringCell={setConfiguringCell}
+          configuringCell={configuringCell}
+          contextMenuEvent={contextMenuEvent}
+          handleCloseContextMenu={handleCloseContextMenu}
+          tooltipEvent={tooltipEvent}
+          handleTooltipShow={handleTooltipShow}
+          handleTooltipHide={handleTooltipHide}
+          handleContextMenu={handleContextMenu}
         />
       </DiagramProvider>
     </ThemeProvider>
+  );
+}
+
+// Sub-component to access diagram context
+function DiagramAppContent({ 
+  designerContent, 
+  repositoryContent,
+  setConfiguringCell,
+  configuringCell,
+  contextMenuEvent,
+  handleCloseContextMenu,
+  tooltipEvent,
+  handleTooltipShow,
+  handleTooltipHide
+}: any) {
+  const { selectedCells } = useDiagram();
+
+
+  return (
+    <WorkbenchLayout 
+      designerContent={designerContent} 
+      repositoryContent={repositoryContent}
+      minimapContent={<Minimap />}
+    />
   );
 }

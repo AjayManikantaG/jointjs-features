@@ -167,6 +167,30 @@ export default function Palette() {
 
       <Divider />
 
+      {/* Module / Octagon */}
+      <DraggableShape
+        title="Module"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'module', 'Module')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="#7CB342" strokeWidth="2">
+          <polygon points="5 2 19 2 24 7 24 17 19 22 5 22 0 17 0 7 5 2" />
+        </svg>
+      </DraggableShape>
+
+      {/* HTTP Connector / Rectangle */}
+      <DraggableShape
+        title="HTTP Connector"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'httpConnector', 'HTTP')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="#4A90E2" strokeWidth="2">
+          <rect x="2" y="6" width="20" height="12" rx="2" />
+        </svg>
+      </DraggableShape>
+
+      <Divider />
+
       {/* Fit Content Action */}
       <ToolButton 
         title="Fit Content"

@@ -99,7 +99,7 @@ interface ContextMenuProps {
 }
 
 export default function ContextMenu({ event, onClose }: ContextMenuProps) {
-  const { graph, commandManager, setSelectedCells, paper } = useDiagram();
+  const { graph, commandManager, setSelectedCells, paper, copy, cut, paste, selectedCells } = useDiagram();
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape
@@ -146,6 +146,34 @@ export default function ContextMenu({ event, onClose }: ContextMenuProps) {
     event.cell.toBack();
     onClose();
   }, [event, onClose]);
+
+  const handleCopy = useCallback(() => {
+    if (!event?.cell) return;
+    // Set selection and copy the specific cell directly
+    setSelectedCells([event.cell]);
+    // Call copy directly on the cell — the clipboard manager's copy 
+    // is wrapped in DiagramProvider which uses selectedCells state.
+    // Instead, we select the cell and trigger copy which will use the updated selection.
+    // Since React state won't be set yet, we need a microtask delay.
+    Promise.resolve().then(() => {
+      copy();
+      onClose();
+    });
+  }, [event, copy, setSelectedCells, onClose]);
+
+  const handleCut = useCallback(() => {
+    if (!event?.cell) return;
+    setSelectedCells([event.cell]);
+    Promise.resolve().then(() => {
+      cut();
+      onClose();
+    });
+  }, [event, cut, setSelectedCells, onClose]);
+
+  const handlePaste = useCallback(() => {
+    paste();
+    onClose();
+  }, [paste, onClose]);
 
   const handleAddStickyNote = useCallback(() => {
     if (!paper) return;
@@ -209,8 +237,21 @@ export default function ContextMenu({ event, onClose }: ContextMenuProps) {
       >
         {hasCell ? (
           <>
+            <MenuItem onClick={handleCopy}>
+              <MenuIcon>📋</MenuIcon> Copy
+              <MenuShortcut>⌘C</MenuShortcut>
+            </MenuItem>
+            <MenuItem onClick={handleCut}>
+              <MenuIcon>✂️</MenuIcon> Cut
+              <MenuShortcut>⌘X</MenuShortcut>
+            </MenuItem>
+            <MenuItem onClick={handlePaste}>
+              <MenuIcon>📄</MenuIcon> Paste
+              <MenuShortcut>⌘V</MenuShortcut>
+            </MenuItem>
+            <MenuDivider />
             <MenuItem onClick={handleDuplicate}>
-              <MenuIcon>📋</MenuIcon> Duplicate
+              <MenuIcon>⧉</MenuIcon> Duplicate
               <MenuShortcut>⌘D</MenuShortcut>
             </MenuItem>
             <MenuItem onClick={handleBringToFront}>
@@ -227,6 +268,11 @@ export default function ContextMenu({ event, onClose }: ContextMenuProps) {
           </>
         ) : (
           <>
+            <MenuItem onClick={handlePaste}>
+              <MenuIcon>📄</MenuIcon> Paste
+              <MenuShortcut>⌘V</MenuShortcut>
+            </MenuItem>
+            <MenuDivider />
             <MenuItem onClick={handleAddRectangle}>
               <MenuIcon>▬</MenuIcon> Add Rectangle
             </MenuItem>

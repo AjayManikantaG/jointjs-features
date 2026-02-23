@@ -10,7 +10,7 @@
  * Interactions covered:
  * - Pan & Zoom (scroll wheel + shift+drag / middle mouse)
  * - Lasso (area) selection
- * - Inline text editing (double-click)
+ * - Double-click settings (replaces inline editing)
  * - Context menu dispatching
  * - Tooltip dispatching
  * - Resize & Rotate handles (custom SVG overlay)
@@ -277,152 +277,24 @@ export function setupLassoSelection(
 }
 
 // ============================================================
-// INLINE TEXT EDITING
+// DOUBLE-CLICK SETTINGS
 // ============================================================
 
 /**
- * Sets up double-click inline text editing on elements.
- * Creates an overlay <input> positioned over the element's label.
- * On blur/enter, updates the element's label attribute.
- * 
- * @param paper The dia.Paper instance
- * @returns Cleanup function
+ * Trigger element:configure on double-click instead of inline editing.
  */
-export function setupInlineEdit(paper: dia.Paper, commandManager?: UndoRedoManager): () => void {
-    let activeInput: HTMLInputElement | null = null;
-    let originalText = '';
-    let editingCell: dia.Cell | null = null;
-
-    const onElementDblClick = (elementView: dia.ElementView, evt: dia.Event) => {
-        if (activeInput) {
-            activeInput.blur();
-            return;
+export function setupDoubleClickSettings(paper: dia.Paper): () => void {
+    const onElementDblClick = (elementView: dia.ElementView) => {
+        const targetElement = elementView.model;
+        if (targetElement) {
+            paper.trigger('element:configure', targetElement);
         }
-
-        const model = elementView.model;
-        editingCell = model;
-
-        // Find the text we want to edit
-        originalText =
-            (model.attr('label/text') as string) ||
-            (model.attr('text/text') as string) ||
-            (model.attr('body/text') as string) ||
-            '';
-
-        // Calculate precise screen coordinates for the element center
-        const bbox = elementView.getBBox();
-        const center = bbox.center();
-        const screenPoint = paper.localToClientPoint(center);
-        const screenX = screenPoint.x;
-        const screenY = screenPoint.y;
-        const scale = paper.scale().sx;
-
-        // Create overlay input
-        const input = document.createElement('input');
-        input.className = 'joint-inline-editor';
-        input.value = originalText;
-
-        // Inject premium styles if not present
-        if (!document.querySelector('#joint-editor-styles')) {
-            const style = document.createElement('style');
-            style.id = 'joint-editor-styles';
-            style.textContent = `
-                @keyframes editorPopIn {
-                    from { opacity: 0; transform: translate(-50%, -40%) scale(0.95); }
-                    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-                }
-                .joint-inline-editor {
-                    position: fixed;
-                    transform: translate(-50%, -50%);
-                    min-width: 140px;
-                    text-align: center;
-                    font-family: 'Inter', sans-serif;
-                    font-weight: 500;
-                    padding: 8px 12px;
-                    border-radius: 12px;
-                    border: 1px solid rgba(123, 97, 255, 0.4);
-                    background: rgba(22, 22, 26, 0.95);
-                    backdrop-filter: blur(12px);
-                    color: white;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
-                    outline: none;
-                    z-index: 1000;
-                    animation: editorPopIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.1) forwards;
-                    transition: border-color 0.2s;
-                }
-                .joint-inline-editor:focus {
-                    border-color: #7B61FF;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 2px rgba(123, 97, 255, 0.3);
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
-        // Object.assign styles for positioning
-        Object.assign(input.style, {
-            left: `${screenX}px`,
-            top: `${screenY}px`,
-            fontSize: `${Math.max(12, 14 * scale)}px`,
-        });
-
-        // We append to document.body to avoid clipping inside the paper container
-        document.body.appendChild(input);
-
-        // Focus and highlight text
-        input.focus();
-        input.select();
-        activeInput = input;
-
-        // Commit changes securely via CommandManager
-        const commitEdit = (revert = false) => {
-            if (!activeInput || !editingCell) return;
-
-            const newText = revert ? originalText : activeInput.value;
-
-            // Only create history entry if the text actually changed
-            if (newText !== originalText && !revert) {
-                // Ensure undo history groups this as a single action
-                if (commandManager) commandManager.startBatch('inline-edit');
-
-                if (editingCell.attr('label/text') !== undefined) {
-                    editingCell.attr('label/text', newText);
-                } else if (editingCell.attr('text/text') !== undefined) {
-                    editingCell.attr('text/text', newText);
-                } else if (editingCell.attr('body/text') !== undefined) {
-                    editingCell.attr('body/text', newText);
-                } else {
-                    editingCell.attr('label/text', newText); // Fallback
-                }
-
-                if (commandManager) commandManager.stopBatch();
-            }
-
-            activeInput.remove();
-            activeInput = null;
-            editingCell = null;
-        };
-
-        // Event listeners
-        input.addEventListener('blur', () => commitEdit(false));
-        input.addEventListener('keydown', (e) => {
-            e.stopPropagation(); // Stop diagram from catching key events (like backspace deleting the element)
-            if (e.key === 'Enter') {
-                input.blur();
-            }
-            if (e.key === 'Escape') {
-                commitEdit(true); // Revert
-            }
-        });
-
-        // Mousedown inside the input must not drag the canvas
-        input.addEventListener('mousedown', (e) => e.stopPropagation());
     };
 
     paper.on('element:pointerdblclick', onElementDblClick);
 
     return () => {
         paper.off('element:pointerdblclick', onElementDblClick);
-        if (activeInput) activeInput.remove();
     };
 }
 
@@ -620,15 +492,14 @@ const TOOLBAR_BUTTONS: ToolbarButton[] = [
 
 /**
  * Sets up element action toolbar with resize and rotate interactions.
- *
+ * 
  * On element click:
- * - Shows a floating mini-toolbar next to the element with 4 buttons:
- *   ▶ Play (pulse animation), ⤢ Resize (toggle handles), ↻ Rotate (toggle handle), ✕ Delete
+ * - Shows a floating mini-toolbar next to the element with 5 buttons
  * - Clicking Resize toggles the 8 resize handles
  * - Clicking Rotate toggles the rotate handle
  * - Clicking Delete removes the element
- * - Clicking Play triggers a visual "running" pulse effect
- *
+ * - Clicking Settings triggers element:configure
+ * 
  * @param paper The dia.Paper instance
  * @param graph The dia.Graph instance
  * @param onSelectionChange Callback to notify of selection changes
@@ -654,7 +525,6 @@ export function setupResizeRotate(
     let batchStarted = false;
 
     const el = paper.el as HTMLElement;
-    // Grab the parent container (the one with position:relative) for absolute HTML positioning
     const containerEl = el.parentElement as HTMLElement;
 
     // ── SVG Helpers ─────────────────────────────────────────
@@ -692,8 +562,7 @@ export function setupResizeRotate(
         const scale = paper.scale().sx;
         const translate = paper.translate();
 
-        // Convert model coords → screen-relative-to-container
-        const screenX = (bbox.x + bbox.width) * scale + translate.tx + 8; // 8px gap to the right
+        const screenX = (bbox.x + bbox.width) * scale + translate.tx + 8;
         const screenY = bbox.y * scale + translate.ty;
 
         toolbarEl.style.left = `${screenX}px`;
@@ -706,7 +575,6 @@ export function setupResizeRotate(
         const bbox = activeElement.getBBox();
         const angle = activeElement.angle() || 0;
 
-        // Resize handles
         const handles = overlayGroup.querySelectorAll('[data-handle-type="resize"]');
         handles.forEach((h) => {
             const pos = h.getAttribute('data-handle-pos') as HandlePosition;
@@ -717,7 +585,6 @@ export function setupResizeRotate(
             h.setAttribute('y', String(y - HANDLE_SIZE / 2));
         });
 
-        // Rotate handle + line
         const rotateHandle = overlayGroup.querySelector('[data-handle-type="rotate"]');
         const rotateLine = overlayGroup.querySelector('[data-handle-type="rotate-line"]');
         if (rotateHandle && rotateLine) {
@@ -736,7 +603,6 @@ export function setupResizeRotate(
             (rotateLine as SVGLineElement).setAttribute('y2', String(cy + rotatedY));
         }
 
-        // Outline
         const outline = overlayGroup.querySelector('[data-handle-type="outline"]');
         if (outline) {
             outline.setAttribute('x', String(bbox.x));
@@ -745,7 +611,6 @@ export function setupResizeRotate(
             outline.setAttribute('height', String(bbox.height));
         }
 
-        // Also reposition the toolbar
         positionToolbar();
     };
 
@@ -772,7 +637,6 @@ export function setupResizeRotate(
             animation: 'toolbarFadeIn 0.15s ease',
         });
 
-        // Inject keyframe animation
         if (!document.querySelector('#joint-toolbar-keyframes')) {
             const style = document.createElement('style');
             style.id = 'joint-toolbar-keyframes';
@@ -790,7 +654,6 @@ export function setupResizeRotate(
             document.head.appendChild(style);
         }
 
-        // Create buttons
         for (const btn of TOOLBAR_BUTTONS) {
             const button = document.createElement('button');
             button.className = 'joint-toolbar-btn';
@@ -813,7 +676,6 @@ export function setupResizeRotate(
                 padding: '0',
             });
 
-            // Hover effects
             button.addEventListener('mouseenter', () => {
                 const isActive = button.getAttribute('data-active') === 'true';
                 if (!isActive) {
@@ -829,7 +691,6 @@ export function setupResizeRotate(
                 }
             });
 
-            // Click handler
             button.addEventListener('click', (e) => {
                 e.stopPropagation();
                 handleToolbarAction(btn.id);
@@ -843,7 +704,6 @@ export function setupResizeRotate(
         positionToolbar();
     };
 
-    // ── Update active state styling on toolbar buttons ───────
     const updateToolbarActiveState = () => {
         if (!toolbarEl) return;
         const buttons = toolbarEl.querySelectorAll('.joint-toolbar-btn');
@@ -861,13 +721,11 @@ export function setupResizeRotate(
         });
     };
 
-    // ── Handle toolbar button clicks ────────────────────────
     const handleToolbarAction = (action: string) => {
         if (!activeElement) return;
 
         switch (action) {
             case 'play': {
-                // Trigger a visual pulse animation on the element
                 const view = paper.findViewByModel(activeElement);
                 if (view) {
                     const svgEl = view.el as unknown as HTMLElement;
@@ -880,11 +738,9 @@ export function setupResizeRotate(
             }
             case 'resize': {
                 if (currentMode === 'resize') {
-                    // Toggle off
                     currentMode = 'none';
                     removeOverlay();
                 } else {
-                    // Toggle on — show resize handles
                     currentMode = 'resize';
                     showResizeHandles();
                 }
@@ -920,19 +776,14 @@ export function setupResizeRotate(
         }
     };
 
-    // ── Show resize handles (SVG overlay) ───────────────────
     const showResizeHandles = () => {
         removeOverlay();
         if (!activeElement) return;
-
-        const svg = el.querySelector('svg');
-        if (!svg) return;
 
         const group = createSVG<SVGGElement>('g');
         group.setAttribute('class', 'joint-resize-rotate-overlay');
         group.setAttribute('pointer-events', 'all');
 
-        // Dashed outline
         const outline = createSVG<SVGRectElement>('rect');
         outline.setAttribute('data-handle-type', 'outline');
         outline.setAttribute('fill', 'none');
@@ -942,7 +793,6 @@ export function setupResizeRotate(
         outline.setAttribute('pointer-events', 'none');
         group.appendChild(outline);
 
-        // 8 resize handles
         for (const handleInfo of RESIZE_HANDLES) {
             const rect = createSVG<SVGRectElement>('rect');
             rect.setAttribute('data-handle-type', 'resize');
@@ -960,7 +810,6 @@ export function setupResizeRotate(
             group.appendChild(rect);
         }
 
-        // Append to the layers container which carries the paper's pan/zoom transform
         const layersContainer = el.querySelector('svg .joint-layers');
         if (layersContainer) {
             layersContainer.appendChild(group);
@@ -969,19 +818,14 @@ export function setupResizeRotate(
         updateHandlePositions();
     };
 
-    // ── Show rotate handle (SVG overlay) ────────────────────
     const showRotateHandle = () => {
         removeOverlay();
         if (!activeElement) return;
-
-        const svg = el.querySelector('svg');
-        if (!svg) return;
 
         const group = createSVG<SVGGElement>('g');
         group.setAttribute('class', 'joint-resize-rotate-overlay');
         group.setAttribute('pointer-events', 'all');
 
-        // Dashed outline
         const outline = createSVG<SVGRectElement>('rect');
         outline.setAttribute('data-handle-type', 'outline');
         outline.setAttribute('fill', 'none');
@@ -991,7 +835,6 @@ export function setupResizeRotate(
         outline.setAttribute('pointer-events', 'none');
         group.appendChild(outline);
 
-        // Connector line
         const rotateLine = createSVG<SVGLineElement>('line');
         rotateLine.setAttribute('data-handle-type', 'rotate-line');
         rotateLine.setAttribute('stroke', ACCENT_COLOR);
@@ -1000,7 +843,6 @@ export function setupResizeRotate(
         rotateLine.setAttribute('pointer-events', 'none');
         group.appendChild(rotateLine);
 
-        // Rotate circle
         const rotateCircle = createSVG<SVGCircleElement>('circle');
         rotateCircle.setAttribute('data-handle-type', 'rotate');
         rotateCircle.setAttribute('r', '6');
@@ -1013,7 +855,6 @@ export function setupResizeRotate(
         rotateCircle.addEventListener('mouseleave', () => { if (!isDragging) rotateCircle.setAttribute('fill', '#232329'); });
         group.appendChild(rotateCircle);
 
-        // Append to the layers container which carries the paper's pan/zoom transform
         const layersContainer = el.querySelector('svg .joint-layers');
         if (layersContainer) {
             layersContainer.appendChild(group);
@@ -1022,7 +863,6 @@ export function setupResizeRotate(
         updateHandlePositions();
     };
 
-    // ── Drag interaction on SVG handles ─────────────────────
     const onOverlayMouseDown = (e: MouseEvent) => {
         const target = e.target as SVGElement;
         if (!target || !activeElement) return;
@@ -1113,6 +953,7 @@ export function setupResizeRotate(
             activeElement.position(newX, newY);
             activeElement.resize(newW, newH);
             updateHandlePositions();
+            positionToolbar();
         }
 
         if (dragType === 'rotate') {
@@ -1128,6 +969,7 @@ export function setupResizeRotate(
 
             activeElement.rotate(angleDeg, true);
             updateHandlePositions();
+            positionToolbar();
         }
     };
 
@@ -1143,14 +985,11 @@ export function setupResizeRotate(
         }
     };
 
-    // ── Element / blank click handlers ──────────────────────
     const onElementPointerClick = (elementView: dia.ElementView) => {
         const element = elementView.model as dia.Element;
         if (activeElement === element && toolbarEl) {
-            // Already selected — do nothing (toolbar is showing)
             return;
         }
-        // New selection
         cleanupAll();
         activeElement = element;
         showToolbar(element);
@@ -1162,7 +1001,6 @@ export function setupResizeRotate(
         onSelectionChange([]);
     };
 
-    // Keep handles + toolbar in sync with model changes
     const onElementChange = () => {
         if (activeElement) {
             if (overlayGroup) updateHandlePositions();
@@ -1170,9 +1008,10 @@ export function setupResizeRotate(
         }
     };
 
-    // ── Event binding ───────────────────────────────────────
     paper.on('element:pointerclick', onElementPointerClick);
     paper.on('blank:pointerclick', onBlankPointerClick);
+    paper.on('scale', positionToolbar);
+    paper.on('translate', positionToolbar);
     graph.on('change', onElementChange);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
@@ -1192,6 +1031,8 @@ export function setupResizeRotate(
     return () => {
         paper.off('element:pointerclick', onElementPointerClick);
         paper.off('blank:pointerclick', onBlankPointerClick);
+        paper.off('scale', positionToolbar);
+        paper.off('translate', positionToolbar);
         graph.off('change', onElementChange);
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
@@ -1200,6 +1041,64 @@ export function setupResizeRotate(
         }
         cleanupAll();
     };
+}
+
+// ============================================================
+// CLIPBOARD FUNCTIONALITY
+// ============================================================
+
+let clipboard: dia.Cell[] = [];
+
+/**
+ * Copies selected cells to the internal clipboard.
+ */
+export function copySelectedCells(cells: dia.Cell[]): void {
+    if (cells.length === 0) return;
+    // Clone cells and their positions
+    clipboard = cells.map(cell => cell.clone());
+}
+
+/**
+ * Cuts selected cells (copy + remove).
+ */
+export function cutSelectedCells(cells: dia.Cell[], graph: dia.Graph): void {
+    if (cells.length === 0) return;
+    copySelectedCells(cells);
+    graph.startBatch('cut');
+    cells.forEach(cell => cell.remove());
+    graph.stopBatch('cut');
+}
+
+/**
+ * Pastes cells from the internal clipboard onto the graph.
+ */
+export function pasteCells(graph: dia.Graph, paper: dia.Paper): dia.Cell[] {
+    if (clipboard.length === 0) return [];
+
+    graph.startBatch('paste');
+    const pastedCells = clipboard.map(cell => {
+        const clone = cell.clone();
+        // Offset for visibility if it's an element
+        if (clone.isElement()) {
+            (clone as dia.Element).translate(20, 20);
+        }
+        return clone;
+    });
+
+    graph.addCells(pastedCells);
+    graph.stopBatch('paste');
+
+    // Update clipboard with new clones for subsequent pastes
+    clipboard = pastedCells.map(cell => cell.clone());
+
+    return pastedCells;
+}
+
+/**
+ * Checks if the clipboard has content.
+ */
+export function hasClipboardContent(): boolean {
+    return clipboard.length > 0;
 }
 
 // ============================================================
@@ -1227,13 +1126,13 @@ export function setupKeyboardShortcuts(handlers: {
     onDelete: () => void;
     onSelectAll: () => void;
     onCopy: () => void;
+    onCut: () => void;
     onPaste: () => void;
     onEscape: () => void;
 }): () => void {
     const onKeyDown = (e: KeyboardEvent) => {
         const isMod = e.metaKey || e.ctrlKey;
 
-        // Ignore if typing in an input
         if (
             e.target instanceof HTMLInputElement ||
             e.target instanceof HTMLTextAreaElement
@@ -1250,6 +1149,9 @@ export function setupKeyboardShortcuts(handlers: {
         } else if (isMod && e.key === 'c') {
             e.preventDefault();
             handlers.onCopy();
+        } else if (isMod && e.key === 'x') {
+            e.preventDefault();
+            handlers.onCut();
         } else if (isMod && e.key === 'v') {
             e.preventDefault();
             handlers.onPaste();
@@ -1277,12 +1179,6 @@ export function setupKeyboardShortcuts(handlers: {
 
 /**
  * Allows multiple selected elements to be moved together seamlessly.
- * When one element in the selection is dragged, the others translate identically.
- * 
- * @param paper The dia.Paper instance
- * @param graph The dia.Graph instance
- * @param getSelected Function to return the current array of selected cells
- * @returns Cleanup function
  */
 export function setupMultiSelectionMove(
     paper: dia.Paper,
@@ -1298,7 +1194,6 @@ export function setupMultiSelectionMove(
         const model = elementView.model;
         const selected = getSelected();
 
-        // Only activate if we grab an item that is ALREADY part of a multi-selection
         if (selected.length > 1 && selected.some((c) => c.id === model.id)) {
             isDragging = true;
             dragElementId = model.id as string;
@@ -1317,7 +1212,6 @@ export function setupMultiSelectionMove(
 
         if (dx === 0 && dy === 0) return;
 
-        // Apply this exact relative delta to all OTHER selected elements simultaneously
         const selected = getSelected();
         selected.forEach((cell) => {
             if (cell.id !== dragElementId && cell.isElement()) {
@@ -1325,7 +1219,6 @@ export function setupMultiSelectionMove(
             }
         });
 
-        // Update lastPos for the next tick
         lastPos = currentPos;
     };
 
@@ -1349,4 +1242,3 @@ export function setupMultiSelectionMove(
         paper.off('element:pointerup', onPointerUp);
     };
 }
-

@@ -402,7 +402,7 @@ export default function ConfigModal({ cell, onClose }: ConfigModalProps) {
   useEffect(() => {
     if (!cell) return;
     
-    setModuleName(cell.attr('module/name') as string || '');
+    setModuleName(cell.attr('module/name') as string || cell.attr('label/text') as string || '');
     setPluginGroup(cell.attr('module/pluginGroup') as string || '');
     setPluginName(cell.attr('module/pluginName') as string || '');
     setInputType(cell.attr('module/inputType') as string || '');
@@ -433,10 +433,8 @@ export default function ConfigModal({ cell, onClose }: ConfigModalProps) {
     cell.attr('module/schemaCheckInput', schemaCheckInput);
     cell.attr('module/schemaCheckOutput', schemaCheckOutput);
     
-    // Also update the visible label if it's currently empty
-    if (!cell.attr('label/text')) {
-       cell.attr('label/text', moduleName || cell.get('type'));
-    }
+    // Also update the visible label to match the module name
+    cell.attr('label/text', moduleName || cell.get('type'));
 
     commandManager.stopBatch();
     onClose();

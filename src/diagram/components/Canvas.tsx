@@ -22,7 +22,7 @@ import { applyRoutingListeners } from '../engine/obstacleRouter';
 import {
   setupPanZoom,
   setupLassoSelection,
-  setupInlineEdit,
+  setupDoubleClickSettings,
   setupContextMenu,
   setupTooltips,
   setupKeyboardShortcuts,
@@ -80,6 +80,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     clearSelection,
     selectedCells,
     copy,
+    cut,
     paste,
     interactionMode,
     undoRedoManager,
@@ -157,8 +158,8 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       }),
     );
 
-    // 3. Inline text editing
-    cleanups.push(setupInlineEdit(newPaper, undoRedoManager || undefined));
+    // 3. Double-click to configure
+    cleanups.push(setupDoubleClickSettings(newPaper));
 
     // 4. Context menu
     cleanups.push(
@@ -184,6 +185,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
         onDelete: deleteSelected,
         onSelectAll: selectAll,
         onCopy: copy,
+        onCut: cut,
         onPaste: paste,
         onEscape: clearSelection,
       }),
@@ -432,6 +434,55 @@ function createElementFromPalette(
   label: string,
 ): dia.Element {
   switch (type) {
+    case 'httpConnector':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 80, height: 40 },
+        attrs: {
+          body: {
+            fill: '#F5F7FA',
+            stroke: '#4A90E2',
+            strokeWidth: 2,
+            rx: 4,
+            ry: 4,
+          },
+          label: {
+            text: label || 'HTTP',
+            fill: '#1A1A1A',
+            fontSize: 11,
+            fontFamily: FONT,
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
+    case 'module':
+      return new shapes.standard.Polygon({
+        position: { x, y },
+        size: { width: 80, height: 60 },
+        attrs: {
+          body: {
+            fill: '#F5F7FA',
+            stroke: '#7CB342', // Green stroke like in the image
+            strokeWidth: 2,
+            refPoints: '20,0 80,0 100,20 100,80 80,100 20,100 0,80 0,20',
+          },
+          label: {
+            text: label || 'Module',
+            fill: '#1A1A1A',
+            fontSize: 11,
+            fontFamily: FONT,
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10, // Positioned above the shape
+          },
+        },
+        ports: BPM_PORT_CONFIG,
+      });
+
     // ── EVENTS ─────────────────────────────────────────────
     case 'startEvent':
       return new shapes.standard.Circle({
@@ -439,16 +490,18 @@ function createElementFromPalette(
         size: { width: 60, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#2DD4A8',
             strokeWidth: 2,
           },
           label: {
             text: label || 'Start',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 11,
             fontFamily: FONT,
-            refY: '120%',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: START_PORT_CONFIG,
@@ -460,16 +513,18 @@ function createElementFromPalette(
         size: { width: 60, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#FF5C5C',
             strokeWidth: 4,
           },
           label: {
             text: label || 'End',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 11,
             fontFamily: FONT,
-            refY: '120%',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: END_PORT_CONFIG,
@@ -481,16 +536,18 @@ function createElementFromPalette(
         size: { width: 60, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#FFB224',
             strokeWidth: 2,
           },
           label: {
             text: label || 'Intermediate',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 11,
             fontFamily: FONT,
-            refY: '120%',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -503,7 +560,7 @@ function createElementFromPalette(
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#3A3A44',
             strokeWidth: 1.5,
             rx: 10,
@@ -511,9 +568,12 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Task',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -525,7 +585,7 @@ function createElementFromPalette(
         size: { width: 180, height: 100 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#3A3A44',
             strokeWidth: 1.5,
             rx: 10,
@@ -533,9 +593,12 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Sub-Process',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -547,7 +610,7 @@ function createElementFromPalette(
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#9B9BA4',
             strokeWidth: 3.5,
             rx: 10,
@@ -555,9 +618,12 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Call Activity',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -570,17 +636,19 @@ function createElementFromPalette(
         size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#FFB224',
             strokeWidth: 2,
             refPoints: '50,0 100,50 50,100 0,50',
           },
           label: {
-            text: '✕',
-            fill: '#FFB224',
-            fontSize: 20,
+            text: label || 'Exclusive',
+            fill: '#1A1A1A',
+            fontSize: 11,
             fontFamily: FONT,
-            fontWeight: 'bold',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -592,17 +660,19 @@ function createElementFromPalette(
         size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#FFB224',
             strokeWidth: 2,
             refPoints: '50,0 100,50 50,100 0,50',
           },
           label: {
-            text: '+',
-            fill: '#FFB224',
-            fontSize: 24,
+            text: label || 'Parallel',
+            fill: '#1A1A1A',
+            fontSize: 11,
             fontFamily: FONT,
-            fontWeight: 'bold',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -614,17 +684,19 @@ function createElementFromPalette(
         size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#FFB224',
             strokeWidth: 2,
             refPoints: '50,0 100,50 50,100 0,50',
           },
           label: {
-            text: '○',
-            fill: '#FFB224',
-            fontSize: 20,
+            text: label || 'Inclusive',
+            fill: '#1A1A1A',
+            fontSize: 11,
             fontFamily: FONT,
-            fontWeight: 'bold',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -637,7 +709,7 @@ function createElementFromPalette(
         size: { width: 80, height: 100 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#9B9BA4',
             strokeWidth: 1.5,
             rx: 2,
@@ -645,10 +717,12 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Data Object',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 11,
             fontFamily: FONT,
-            refY: '110%',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -660,16 +734,18 @@ function createElementFromPalette(
         size: { width: 80, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#9B9BA4',
             strokeWidth: 1.5,
           },
           label: {
             text: label || 'Data Store',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 11,
             fontFamily: FONT,
-            refY: '130%',
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -682,7 +758,7 @@ function createElementFromPalette(
         size: { width: 140, height: 100 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#4A90E2',
             strokeWidth: 2,
             rx: 2,
@@ -690,11 +766,13 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Business Object',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
             fontWeight: 'bold',
-            refY: 20,
+            textVerticalAnchor: 'bottom',
+            refY: 0,
+            y: -10,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -711,14 +789,14 @@ function createElementFromPalette(
           },
           label: {
             text: `• ${label || 'Attribute'}`,
-            fill: '#A0A0A0',
+            fill: '#333333',
             fontSize: 12,
             fontFamily: FONT,
             textAnchor: 'start',
             refX: 10,
           },
         },
-        ports: BPM_PORT_CONFIG, // Simplified ports might be better here later
+        ports: BPM_PORT_CONFIG,
       });
 
     case 'businessMethod':
@@ -732,7 +810,7 @@ function createElementFromPalette(
           },
           label: {
             text: `+ ${label || 'Method'}()`,
-            fill: '#A0A0A0',
+            fill: '#333333',
             fontSize: 12,
             fontFamily: FONT,
             textAnchor: 'start',
@@ -749,7 +827,7 @@ function createElementFromPalette(
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#F5A623',
             strokeWidth: 2,
             rx: 4,
@@ -757,10 +835,11 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Org Unit',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
             fontWeight: 'bold',
+            refY: -25,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -772,7 +851,7 @@ function createElementFromPalette(
         size: { width: 140, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#F5A623',
             strokeWidth: 1.5,
             strokeDasharray: '4,4',
@@ -781,31 +860,33 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Role',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 12,
             fontFamily: FONT,
+            refY: -20,
           },
         },
         ports: BPM_PORT_CONFIG,
       });
 
     case 'orgPerson':
-      return new shapes.standard.Rectangle({ // Simulating a person node with icon space
+      return new shapes.standard.Rectangle({ 
         position: { x, y },
         size: { width: 120, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#F5A623',
             strokeWidth: 1.5,
-            rx: 30, // Pill shape
-            ry: 30,
+            rx: 10,
+            ry: 10,
           },
           label: {
             text: label || 'Person',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 12,
             fontFamily: FONT,
+            refY: -20,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -817,17 +898,17 @@ function createElementFromPalette(
         size: { width: 100, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#F5A623',
             strokeWidth: 1.5,
             refPoints: '0,0 100,0 100,60 50,100 0,60', // Pin shape
           },
           label: {
             text: label || 'Location',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 12,
             fontFamily: FONT,
-            refY: '40%',
+            refY: -20,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -840,7 +921,7 @@ function createElementFromPalette(
         size: { width: 160, height: 100 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#7ED321',
             strokeWidth: 2,
             rx: 6,
@@ -848,10 +929,11 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'IT System',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
             fontWeight: 'bold',
+            refY: -25,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -863,20 +945,21 @@ function createElementFromPalette(
         size: { width: 100, height: 120 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#7ED321',
             strokeWidth: 2,
           },
           top: {
-            fill: '#232329',
+            fill: '#EAEDF1',
             stroke: '#7ED321',
             strokeWidth: 2,
           },
           label: {
             text: label || 'Database',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 12,
             fontFamily: FONT,
+            refY: -20,
           },
         },
         ports: {
@@ -907,7 +990,7 @@ function createElementFromPalette(
             fontSize: 14,
             fontFamily: FONT,
             fontWeight: 'bold',
-            refY: 20,
+            refY: -30,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -921,16 +1004,17 @@ function createElementFromPalette(
         size: { width: 140, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#BD10E0', // Purple for technical rules/converters
             strokeWidth: 2,
             refPoints: '0,50 20,0 100,0 120,50 100,100 20,100', // Hexagon
           },
           label: {
             text: label || 'Converter',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 12,
             fontFamily: FONT,
+            refY: -20,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -942,7 +1026,7 @@ function createElementFromPalette(
         size: { width: 120, height: 60 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#BD10E0',
             strokeWidth: 3, // Thicker border for system connectors
             rx: 0,
@@ -950,9 +1034,10 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Connector',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 12,
             fontFamily: FONT,
+            refY: -20,
           },
         },
         ports: BPM_PORT_CONFIG,
@@ -964,7 +1049,7 @@ function createElementFromPalette(
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#232329',
+            fill: '#F5F7FA',
             stroke: '#3A3A44',
             strokeWidth: 1.5,
             rx: 8,
@@ -972,9 +1057,10 @@ function createElementFromPalette(
           },
           label: {
             text: label || 'Node',
-            fill: '#EDEDEF',
+            fill: '#1A1A1A',
             fontSize: 13,
             fontFamily: FONT,
+            refY: -25,
           },
         },
         ports: BPM_PORT_CONFIG,
