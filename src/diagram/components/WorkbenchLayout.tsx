@@ -240,19 +240,6 @@ const TabItem = styled.div<{ $active?: boolean }>`
   }
 `;
 
-const CommentBtn = styled.button`
-  background: transparent;
-  border: 1px solid ${({ theme }) => theme.colors.border.default};
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: ${({ theme }) => theme.colors.text.secondary};
-  cursor: pointer;
-  
-  &:hover {
-    background: rgba(0,0,0,0.02);
-  }
-`;
 
 const CanvasWrapper = styled.div`
   flex: 1;
@@ -341,10 +328,6 @@ export default function WorkbenchLayout({ designerContent, repositoryContent, mi
 
       <MainWrapper>
         <PrimaryNav>
-          <NavItem $active={activeMainTab === 'designer'} onClick={() => setActiveMainTab('designer')}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 006 21c1.282 0 2.47-.402 3.445-1.087.81.22 1.668.337 2.555.337z" /></svg>
-            Designer
-          </NavItem>
           <NavItem $active={activeMainTab === 'editor'} onClick={() => setActiveMainTab('editor')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
             Editor
@@ -411,7 +394,6 @@ export default function WorkbenchLayout({ designerContent, repositoryContent, mi
                  Show module numbers
               </TabItem>
             </TabsList>
-            <CommentBtn>Make a comment</CommentBtn>
           </TabsBar>
 
           <CanvasWrapper>
