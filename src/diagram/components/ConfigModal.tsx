@@ -413,6 +413,15 @@ export default function ConfigModal({ cell, onClose }: ConfigModalProps) {
     setSchemaCheckOutput(cell.attr('module/schemaCheckOutput') as boolean || false);
   }, [cell]);
 
+  // Close on Escape key
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
       onClose();

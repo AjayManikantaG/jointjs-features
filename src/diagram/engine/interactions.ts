@@ -281,22 +281,131 @@ export function setupLassoSelection(
 // ============================================================
 
 /**
- * Trigger element:configure on double-click instead of inline editing.
+ * Sets up double-click behavior based on mode.
+ * 
+ * - 'inline' mode: opens an inline text input overlay on the element
+ * - 'configure' mode: opens the config modal via element:configure event
+ * 
+ * @param paper The JointJS paper instance
+ * @param getMode Function that returns the current double-click mode
  */
-export function setupDoubleClickSettings(paper: dia.Paper): () => void {
+export function setupDoubleClickSettings(
+    paper: dia.Paper,
+    getMode: () => 'inline' | 'configure'
+): () => void {
+    let activeEditor: HTMLInputElement | null = null;
+    let activeElement: dia.Element | null = null;
+
+    const removeEditor = () => {
+        if (activeEditor) {
+            activeEditor.remove();
+            activeEditor = null;
+        }
+        activeElement = null;
+    };
+
+    const commitEdit = () => {
+        if (activeEditor && activeElement) {
+            const newText = activeEditor.value.trim();
+            if (newText) {
+                activeElement.attr('label/text', newText);
+            }
+        }
+        removeEditor();
+    };
+
+    const showInlineEditor = (elementView: dia.ElementView) => {
+        const element = elementView.model;
+        if (!element || !element.isElement()) return;
+
+        removeEditor();
+        activeElement = element;
+
+        const bbox = element.getBBox();
+        const scale = paper.scale().sx;
+        const translate = paper.translate();
+        const paperEl = paper.el as HTMLElement;
+        const containerEl = paperEl.parentElement;
+        if (!containerEl) return;
+
+        const screenX = bbox.x * scale + translate.tx;
+        const screenY = bbox.y * scale + translate.ty;
+        const screenWidth = bbox.width * scale;
+        const screenHeight = bbox.height * scale;
+
+        const currentText =
+            (element.attr('label/text') as string) ||
+            (element.attr('text/text') as string) ||
+            '';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentText;
+        Object.assign(input.style, {
+            position: 'absolute',
+            left: `${screenX}px`,
+            top: `${screenY}px`,
+            width: `${screenWidth}px`,
+            height: `${screenHeight}px`,
+            padding: '0',
+            margin: '0',
+            border: '2px solid #7B61FF',
+            borderRadius: '6px',
+            background: 'rgba(255, 255, 255, 0.95)',
+            color: '#0D0D0F',
+            fontSize: `${Math.max(12, 14 * scale)}px`,
+            fontFamily: "'Inter', sans-serif",
+            fontWeight: '500',
+            textAlign: 'center',
+            outline: 'none',
+            zIndex: '200',
+            boxShadow: '0 0 0 3px rgba(123, 97, 255, 0.2), 0 4px 12px rgba(0,0,0,0.15)',
+            boxSizing: 'border-box',
+            caretColor: '#7B61FF',
+        });
+
+        input.addEventListener('focus', () => input.select());
+        input.addEventListener('keydown', (e: KeyboardEvent) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); removeEditor(); }
+        });
+        input.addEventListener('blur', () => setTimeout(commitEdit, 100));
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
+        input.addEventListener('click', (e) => e.stopPropagation());
+
+        containerEl.appendChild(input);
+        activeEditor = input;
+        requestAnimationFrame(() => input.focus());
+    };
+
     const onElementDblClick = (elementView: dia.ElementView) => {
-        const targetElement = elementView.model;
-        if (targetElement) {
-            paper.trigger('element:configure', targetElement);
+        const mode = getMode();
+        if (mode === 'configure') {
+            const targetElement = elementView.model;
+            if (targetElement) {
+                paper.trigger('element:configure', targetElement);
+            }
+        } else {
+            showInlineEditor(elementView);
         }
     };
 
+    const onBlankClick = () => {
+        if (activeEditor) commitEdit();
+    };
+
     paper.on('element:pointerdblclick', onElementDblClick);
+    paper.on('blank:pointerclick', onBlankClick);
 
     return () => {
         paper.off('element:pointerdblclick', onElementDblClick);
+        paper.off('blank:pointerclick', onBlankClick);
+        removeEditor();
     };
 }
+
+
 
 // ============================================================
 // CONTEXT MENU
@@ -1028,6 +1137,14 @@ export function setupResizeRotate(
         svgEl.addEventListener('mousedown', onSvgMouseDown, true);
     }
 
+    const onEscapeKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && activeElement) {
+            cleanupAll();
+            onSelectionChange([]);
+        }
+    };
+    document.addEventListener('keydown', onEscapeKey);
+
     return () => {
         paper.off('element:pointerclick', onElementPointerClick);
         paper.off('blank:pointerclick', onBlankPointerClick);
@@ -1036,6 +1153,7 @@ export function setupResizeRotate(
         graph.off('change', onElementChange);
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        document.removeEventListener('keydown', onEscapeKey);
         if (svgEl) {
             svgEl.removeEventListener('mousedown', onSvgMouseDown, true);
         }

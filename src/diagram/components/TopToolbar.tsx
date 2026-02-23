@@ -129,7 +129,7 @@ const TooltipText = styled.span`
 // ============================================================
 
 export default function TopToolbar() {
-  const { paper, selectedCells, undo, redo, copy, cut, paste, canUndo, canRedo } = useDiagram();
+  const { paper, selectedCells, undo, redo, copy, cut, paste, canUndo, canRedo, doubleClickMode, setDoubleClickMode } = useDiagram();
   const [zoomLevel, setZoomLevel] = React.useState(100);
 
   React.useEffect(() => {
@@ -154,8 +154,34 @@ export default function TopToolbar() {
     paper.translate(newTx, newTy);
   };
 
+  const toggleDoubleClickMode = () => {
+    setDoubleClickMode(doubleClickMode === 'inline' ? 'configure' : 'inline');
+  };
+
   return (
     <ToolbarContainer onClick={(e) => e.stopPropagation()}>
+      {/* Double-Click Mode Toggle */}
+      <ToolGroup>
+        <TooltipWrapper>
+          <ToolbarButton $active={doubleClickMode === 'inline'} onClick={toggleDoubleClickMode}>
+            {doubleClickMode === 'inline' ? (
+              /* Text cursor icon — inline editing mode */
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 6H7m5-4v20M7 18h10"/>
+                <path d="M12 2a2 2 0 0 1 2 2M12 2a2 2 0 0 0-2 2m2 16a2 2 0 0 1-2-2m2 2a2 2 0 0 0 2-2"/>
+              </svg>
+            ) : (
+              /* Settings gear icon — config modal mode */
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            )}
+          </ToolbarButton>
+          <TooltipText>{doubleClickMode === 'inline' ? 'Mode: Inline Edit' : 'Mode: Config Modal'}</TooltipText>
+        </TooltipWrapper>
+      </ToolGroup>
+
       {/* Clipboard Group */}
       <ToolGroup>
         <TooltipWrapper>

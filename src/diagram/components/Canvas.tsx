@@ -84,6 +84,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     paste,
     interactionMode,
     undoRedoManager,
+    doubleClickMode,
   } = useDiagram();
 
   // Stable references for callbacks
@@ -94,6 +95,9 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
   
   const interactionModeRef = useRef(interactionMode);
   interactionModeRef.current = interactionMode;
+  
+  const doubleClickModeRef = useRef(doubleClickMode);
+  doubleClickModeRef.current = doubleClickMode;
   
   onContextMenuRef.current = onContextMenu;
   onTooltipShowRef.current = onTooltipShow;
@@ -159,7 +163,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     );
 
     // 3. Double-click to configure
-    cleanups.push(setupDoubleClickSettings(newPaper));
+    cleanups.push(setupDoubleClickSettings(newPaper, () => doubleClickModeRef.current));
 
     // 4. Context menu
     cleanups.push(

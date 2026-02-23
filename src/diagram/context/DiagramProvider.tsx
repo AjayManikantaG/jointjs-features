@@ -25,6 +25,7 @@ import { ClipboardManager } from '../engine/clipboard';
 
 export type DiagramType = 'BPMN' | 'Business Object' | 'Organization' | 'System' | 'Technical Workflow';
 export type InteractionMode = 'pointer' | 'pan';
+export type DoubleClickMode = 'inline' | 'configure';
 
 // ============================================================
 // CONTEXT TYPES
@@ -73,6 +74,10 @@ interface DiagramContextValue {
   canRedo: boolean;
   /** Direct access to the UndoRedoManager */
   undoRedoManager: UndoRedoManager | null;
+  /** Double-click mode: inline text editing or config modal */
+  doubleClickMode: DoubleClickMode;
+  /** Set the double-click mode */
+  setDoubleClickMode: (mode: DoubleClickMode) => void;
 }
 
 // ============================================================
@@ -115,6 +120,7 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
   const [interactionMode, setInteractionMode] = useState<InteractionMode>('pointer');
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [doubleClickMode, setDoubleClickMode] = useState<DoubleClickMode>('inline');
 
   // Subscribe to command manager state changes and manage listener lifecycle
   useEffect(() => {
@@ -240,6 +246,8 @@ export function DiagramProvider({ children }: DiagramProviderProps) {
     canUndo,
     canRedo,
     undoRedoManager: cmdManager,
+    doubleClickMode,
+    setDoubleClickMode,
   };
 
   return (
