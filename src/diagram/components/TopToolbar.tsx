@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { useDiagram } from '@/diagram/context/DiagramProvider';
 
@@ -129,8 +129,76 @@ const TooltipText = styled.span`
 // ============================================================
 
 export default function TopToolbar() {
-  const { paper, selectedCells, undo, redo, copy, cut, paste, canUndo, canRedo, doubleClickMode, setDoubleClickMode } = useDiagram();
+  const { graph, paper, selectedCells, undo, redo, copy, cut, paste, canUndo, canRedo, doubleClickMode, setDoubleClickMode, diagramType, commandManager } = useDiagram();
   const [zoomLevel, setZoomLevel] = React.useState(100);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Export: download diagram as JSON ────────────────────
+  const handleExport = useCallback(() => {
+    if (!graph) return;
+
+    const workflow = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      diagramType,
+      viewport: paper ? {
+        zoom: paper.scale().sx,
+        pan: paper.translate(),
+      } : null,
+      graph: graph.toJSON(),
+    };
+
+    const jsonStr = JSON.stringify(workflow, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `workflow-${diagramType.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [graph, paper, diagramType]);
+
+  // ── Import: upload JSON and restore diagram ─────────────
+  const handleImport = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const onFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !graph) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+
+        // Support both raw graph JSON and our wrapper format
+        const graphData = json.graph || json;
+        graph.fromJSON(graphData);
+
+        // Restore viewport if present
+        if (json.viewport && paper) {
+          paper.scale(json.viewport.zoom || 1, json.viewport.zoom || 1);
+          if (json.viewport.pan) {
+            paper.translate(json.viewport.pan.tx || 0, json.viewport.pan.ty || 0);
+          }
+        }
+
+        // Clear undo history since we loaded a new diagram
+        commandManager.clear();
+      } catch (err) {
+        console.error('Failed to import workflow JSON:', err);
+        alert('Invalid workflow JSON file. Please check the file format.');
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset input so the same file can be re-imported
+    e.target.value = '';
+  }, [graph, paper, commandManager]);
 
   React.useEffect(() => {
     if (!paper) return;
@@ -257,6 +325,40 @@ export default function TopToolbar() {
           <TooltipText>Zoom In</TooltipText>
         </TooltipWrapper>
       </ToolGroup>
+
+      {/* Import/Export Group */}
+      <ToolGroup>
+        <TooltipWrapper>
+          <ToolbarButton onClick={handleExport}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </ToolbarButton>
+          <TooltipText>Export JSON</TooltipText>
+        </TooltipWrapper>
+
+        <TooltipWrapper>
+          <ToolbarButton onClick={handleImport}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </ToolbarButton>
+          <TooltipText>Import JSON</TooltipText>
+        </TooltipWrapper>
+      </ToolGroup>
+
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json,application/json"
+        style={{ display: 'none' }}
+        onChange={onFileSelected}
+      />
     </ToolbarContainer>
   );
 }
