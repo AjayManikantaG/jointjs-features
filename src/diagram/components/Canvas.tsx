@@ -34,6 +34,7 @@ import {
 } from '../engine/interactions';
 import { setupSnaplines } from '../engine/snaplines';
 import { setupLinkTools } from '../engine/linkTools';
+import CanvasScrollbars from './CanvasScrollbars';
 
 // ============================================================
 // STYLED COMPONENTS
@@ -373,6 +374,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       onDragOver={onDragOver}
     >
       <PaperWrapper ref={paperContainerRef} />
+      {paper && <CanvasScrollbars paper={paper} graph={graph} />}
     </CanvasContainer>
   );
 }

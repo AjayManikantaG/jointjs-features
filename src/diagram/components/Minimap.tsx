@@ -215,15 +215,28 @@ export default function Minimap() {
   }, [graph, syncNavPaperScale, syncViewportToMainPaper, paper]);
 
 
-  // Effect to sync viewport when main paper pans/zooms
+  // Effect to sync viewport continuously via rAF polling
+  // (paper.on('translate'/'scale') events are unreliable in JointJS v4)
   useEffect(() => {
     if (!paper) return;
 
-    const onTransform = () => syncViewportToMainPaper();
-    
-    paper.on('translate', onTransform);
-    paper.on('scale', onTransform);
-    
+    let running = true;
+    let rafId = 0;
+    let prevTx = -Infinity, prevTy = -Infinity, prevScale = -1;
+
+    const tick = () => {
+      if (!running) return;
+      const { tx, ty } = paper.translate();
+      const scale = paper.scale().sx;
+      if (tx !== prevTx || ty !== prevTy || scale !== prevScale) {
+        prevTx = tx; prevTy = ty; prevScale = scale;
+        syncViewportToMainPaper();
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+
     // Also sync and resize paper when container resizes
     const resizeObserver = new ResizeObserver(() => {
       if (navPaperRef.current && containerRef.current) {
@@ -241,8 +254,8 @@ export default function Minimap() {
     }
 
     return () => {
-      paper.off('translate', onTransform);
-      paper.off('scale', onTransform);
+      running = false;
+      cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
     };
   }, [paper, syncViewportToMainPaper, syncNavPaperScale]);
