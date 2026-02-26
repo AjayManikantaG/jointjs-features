@@ -26,10 +26,10 @@ const ROUTER_DEFAULTS = {
     padding: 20,
     /** Max iterations before fallback to orthogonal */
     maximumLoops: 5000,
-    /** Directions links can start/end from */
-    startDirections: ['top', 'right', 'bottom', 'left'] as string[],
-    endDirections: ['top', 'right', 'bottom', 'left'] as string[],
-    /** Don't treat source/target as obstacles */
+    /** Directions links can start/end from — right (out ports) → left (in ports) */
+    startDirections: ['right'] as string[],
+    endDirections: ['left'] as string[],
+    /** Source and target are excluded from obstacles so the router can reach their ports */
     excludeEnds: ['source', 'target'] as ('source' | 'target')[],
     /** Prefer orthogonal lines where possible */
     perpendicular: true,

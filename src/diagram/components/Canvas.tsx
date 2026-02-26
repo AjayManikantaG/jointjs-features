@@ -33,6 +33,7 @@ import {
   setupMultiSelectionMove,
 } from '../engine/interactions';
 import { setupSnaplines } from '../engine/snaplines';
+import { setupLinkTools } from '../engine/linkTools';
 
 // ============================================================
 // STYLED COMPONENTS
@@ -213,7 +214,10 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       setupMultiSelectionMove(newPaper, graph, () => selectedCellsRef.current, undoRedoManager || undefined),
     );
 
-    // 11. Configuration Modal listener
+    // 12. Link Tools (vertex / segment / arrowhead handles)
+    cleanups.push(setupLinkTools(newPaper, graph));
+
+    // 13. Configuration Modal listener
     newPaper.on('element:configure', (elementView: dia.ElementView | dia.Element) => {
       // It might pass the element directly depending on how we triggered it
       const cell = elementView instanceof dia.Element ? elementView : elementView.model;
