@@ -76,17 +76,16 @@ export function setupPanZoom(paper: dia.Paper, getInteractionMode: () => 'pointe
         const newScale = Math.max(0.1, Math.min(3, currentScale + delta));
 
         // Zoom centered on cursor position
-        const paperRect = el.getBoundingClientRect();
-        const offsetX = e.clientX - paperRect.left;
-        const offsetY = e.clientY - paperRect.top;
+        const localPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
 
-        const currentTranslate = paper.translate();
-        const scaleFactor = newScale / currentScale;
-
-        const newTx = offsetX - scaleFactor * (offsetX - currentTranslate.tx);
-        const newTy = offsetY - scaleFactor * (offsetY - currentTranslate.ty);
-
+        // Apply new scale
         paper.scale(newScale, newScale);
+
+        // Adjust translation so the same local point remains under the cursor
+        const paperRect = el.getBoundingClientRect();
+        const newTx = e.clientX - paperRect.left - localPoint.x * newScale;
+        const newTy = e.clientY - paperRect.top - localPoint.y * newScale;
+
         paper.translate(newTx, newTy);
     };
 
@@ -99,8 +98,12 @@ export function setupPanZoom(paper: dia.Paper, getInteractionMode: () => 'pointe
         if (originalEvent.shiftKey || originalEvent.button === 1 || getInteractionMode() === 'pan') {
             isPanning = true;
             panStart = { x: originalEvent.clientX, y: originalEvent.clientY };
-            const translate = paper.translate();
-            originStart = { tx: translate.tx, ty: translate.ty };
+
+            // Find the overflow: auto container (CanvasContainer is the parent of PaperWrapper)
+            const container = el.parentElement?.parentElement;
+            if (container) {
+                originStart = { tx: container.scrollLeft, ty: container.scrollTop };
+            }
             el.style.cursor = 'grabbing';
         }
     };
@@ -109,7 +112,12 @@ export function setupPanZoom(paper: dia.Paper, getInteractionMode: () => 'pointe
         if (!isPanning) return;
         const dx = e.clientX - panStart.x;
         const dy = e.clientY - panStart.y;
-        paper.translate(originStart.tx + dx, originStart.ty + dy);
+
+        const container = el.parentElement?.parentElement;
+        if (container) {
+            container.scrollLeft = originStart.tx - dx;
+            container.scrollTop = originStart.ty - dy;
+        }
     };
 
     const onMouseUp = () => {
@@ -155,6 +163,7 @@ export function setupLassoSelection(
     graph: dia.Graph,
     getInteractionMode: () => 'pointer' | 'pan',
     onSelectionChange: SelectionCallback,
+    getSelected?: () => dia.Cell[],
 ): () => void {
     let isSelecting = false;
     let didLasso = false;           // True when a real lasso drag occurred
@@ -249,9 +258,26 @@ export function setupLassoSelection(
         }
     };
 
-    // Click on element to select it
-    const onElementPointerClick = (elementView: dia.ElementView) => {
-        onSelectionChange([elementView.model]);
+    // Click on element to select it (Shift+click toggles additive selection)
+    const onElementPointerClick = (elementView: dia.ElementView, evt: dia.Event) => {
+        const originalEvent = evt.originalEvent as MouseEvent;
+        // Use Shift for multi-select (Ctrl+click triggers right-click/context menu on macOS)
+        const isMultiSelectModifier = originalEvent.shiftKey;
+
+        if (isMultiSelectModifier && getSelected) {
+            const current = getSelected();
+            const model = elementView.model;
+            const alreadySelected = current.some(c => c.id === model.id);
+            if (alreadySelected) {
+                // Remove from selection
+                onSelectionChange(current.filter(c => c.id !== model.id));
+            } else {
+                // Add to selection
+                onSelectionChange([...current, model]);
+            }
+        } else {
+            onSelectionChange([elementView.model]);
+        }
     };
 
     // Click on blank to clear selection — but not right after a lasso
@@ -1094,7 +1120,15 @@ export function setupResizeRotate(
         }
     };
 
-    const onElementPointerClick = (elementView: dia.ElementView) => {
+    const onElementPointerClick = (elementView: dia.ElementView, evt: dia.Event) => {
+        const originalEvent = evt.originalEvent as MouseEvent;
+
+        // If Shift is pressed (multi-select), hide the toolbar and let setupLassoSelection handle the selection
+        if (originalEvent.shiftKey) {
+            cleanupAll();
+            return;
+        }
+
         const element = elementView.model as dia.Element;
         if (activeElement === element && toolbarEl) {
             return;

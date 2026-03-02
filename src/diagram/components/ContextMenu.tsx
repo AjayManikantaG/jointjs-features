@@ -12,10 +12,11 @@
  */
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import styled from 'styled-components';
 import { dia, shapes } from '@joint/core';
 import { useDiagram } from '../context/DiagramProvider';
+import { getObstacleRouterConfig } from '../engine/obstacleRouter';
 import type { ContextMenuEvent } from '../engine/interactions';
 
 // ============================================================
@@ -223,9 +224,52 @@ export default function ContextMenu({ event, onClose }: ContextMenuProps) {
     onClose();
   }, [graph, paper, event, onClose]);
 
+  // Connect two selected elements with a link
+  const handleConnect = useCallback(() => {
+    // Filter to only elements (not links)
+    const elements = selectedCells.filter(c => c.isElement()) as dia.Element[];
+    if (elements.length !== 2) return;
+
+    const [a, b] = elements;
+    // Determine direction: left-most element is the source
+    const aPos = a.position();
+    const bPos = b.position();
+    const [source, target] = aPos.x <= bPos.x ? [a, b] : [b, a];
+
+    commandManager.startBatch('connect');
+
+    // Dynamically find output port on source and input port on target
+    const sourcePorts = source.getPorts();
+    const targetPorts = target.getPorts();
+    const outPort = sourcePorts.find(p => p.group === 'out')?.id || 'out1';
+    const inPort = targetPorts.find(p => p.group === 'in')?.id || 'in1';
+
+    const link = new shapes.standard.Link({
+      source: { id: source.id, port: outPort },
+      target: { id: target.id, port: inPort },
+      attrs: {
+        line: {
+          stroke: '#A262FF',
+          strokeWidth: 2,
+          targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
+          strokeDasharray: '0',
+        },
+      },
+      router: getObstacleRouterConfig(graph),
+      connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
+    });
+
+    graph.addCell(link);
+    commandManager.stopBatch();
+    onClose();
+  }, [selectedCells, graph, commandManager, onClose]);
+
   if (!event) return null;
 
   const hasCell = !!event.cell;
+  // Check if exactly 2 elements are selected (for the Connect option)
+  const selectedElements = selectedCells.filter(c => c.isElement());
+  const hasTwoElements = selectedElements.length === 2;
 
   return (
     <MenuOverlay onClick={onClose}>
@@ -237,6 +281,14 @@ export default function ContextMenu({ event, onClose }: ContextMenuProps) {
       >
         {hasCell ? (
           <>
+            {hasTwoElements && (
+              <>
+                <MenuItem onClick={handleConnect}>
+                  <MenuIcon>🔗</MenuIcon> Connect
+                </MenuItem>
+                <MenuDivider />
+              </>
+            )}
             <MenuItem onClick={handleCopy}>
               <MenuIcon>📋</MenuIcon> Copy
               <MenuShortcut>⌘C</MenuShortcut>

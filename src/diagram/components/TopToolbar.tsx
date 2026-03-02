@@ -3,6 +3,7 @@
 import React, { useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { useDiagram } from '@/diagram/context/DiagramProvider';
+import { getObstacleRouterConfig } from '@/diagram/engine/obstacleRouter';
 
 // ============================================================
 // STYLED COMPONENTS — matches Palette (FloatingToolbarContainer)
@@ -175,9 +176,14 @@ export default function TopToolbar() {
       try {
         const json = JSON.parse(event.target?.result as string);
 
-        // Support both raw graph JSON and our wrapper format
         const graphData = json.graph || json;
         graph.fromJSON(graphData);
+
+        // Upgrade legacy links from imported JSON to use the new routing/jumpover configs
+        graph.getLinks().forEach(link => {
+          link.set('router', getObstacleRouterConfig(graph));
+          link.set('connector', { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } });
+        });
 
         // Restore viewport if present
         if (json.viewport && paper) {

@@ -43,8 +43,8 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
     const {
         el,
         graph,
-        width = 4000,
-        height = 4000,
+        width = '100%',
+        height = '100%',
         gridSize = 20,
         drawGrid,
         async: asyncRendering = true,
@@ -94,7 +94,7 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
                 },
                 // Apply obstacle-aware routing by default
                 router: getObstacleRouterConfig(graph),
-                connector: { name: 'rounded', args: { radius: 8 } },
+                connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
             }),
 
         // Validate new connections

@@ -29,8 +29,8 @@ const ROUTER_DEFAULTS = {
     /** Directions links can start/end from — right (out ports) → left (in ports) */
     startDirections: ['right'] as string[],
     endDirections: ['left'] as string[],
-    /** Source and target are excluded from obstacles so the router can reach their ports */
-    excludeEnds: ['source', 'target'] as ('source' | 'target')[],
+    /** Source and target are NOT excluded from obstacles so the router goes around them before reaching ports */
+    excludeEnds: [] as ('source' | 'target')[],
     /** Prefer orthogonal lines where possible */
     perpendicular: true,
 };

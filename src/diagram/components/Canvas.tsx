@@ -18,7 +18,7 @@ import styled from 'styled-components';
 import { dia, shapes } from '@joint/core';
 import { useDiagram } from '../context/DiagramProvider';
 import { createPaper } from '../engine/createPaper';
-import { applyRoutingListeners } from '../engine/obstacleRouter';
+import { applyRoutingListeners, getObstacleRouterConfig } from '../engine/obstacleRouter';
 import {
   setupPanZoom,
   setupLassoSelection,
@@ -34,7 +34,6 @@ import {
 } from '../engine/interactions';
 import { setupSnaplines } from '../engine/snaplines';
 import { setupLinkTools } from '../engine/linkTools';
-import CanvasScrollbars from './CanvasScrollbars';
 
 // ============================================================
 // STYLED COMPONENTS
@@ -44,14 +43,14 @@ const CanvasContainer = styled.div`
   width: 100%;
   height: 100%;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
   background: ${({ theme }) => theme.colors.bg.canvas};
   cursor: default;
 `;
 
 const PaperWrapper = styled.div`
-  width: 100%;
-  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
   position: absolute;
   top: 0;
   left: 0;
@@ -157,11 +156,11 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     // 1. Pan & Zoom
     cleanups.push(setupPanZoom(newPaper, () => interactionModeRef.current));
 
-    // 2. Lasso selection
+    // 2. Lasso selection (with Ctrl+click multi-select support)
     cleanups.push(
       setupLassoSelection(newPaper, graph, () => interactionModeRef.current, (cells) => {
         setSelectedCells(cells);
-      }),
+      }, () => selectedCellsRef.current),
     );
 
     // 3. Double-click to configure
@@ -218,16 +217,57 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     // 12. Link Tools (vertex / segment / arrowhead handles)
     cleanups.push(setupLinkTools(newPaper, graph));
 
-    // 13. Group auto-resize: expand group to fit children
+    // 13. Native Auto-Expanding Canvas
+    const autoFitCanvas = () => {
+      if (!container) return;
+      newPaper.fitToContent({
+        padding: 100,
+        allowNewOrigin: 'negative',
+        minWidth: container.clientWidth,
+        minHeight: container.clientHeight,
+      });
+    };
+
+    // Trigger on structural / positional changes and zooming
+    graph.on('add remove change:position change:size', autoFitCanvas);
+    newPaper.on('scale', autoFitCanvas);
+    
+    // Also trigger on window resize so minWidth/minHeight adapt
+    const resizeObserver = new ResizeObserver(() => autoFitCanvas());
+    resizeObserver.observe(container);
+
+    // Initial fit (delayed slightly to ensure container has layout)
+    setTimeout(autoFitCanvas, 10);
+
+    cleanups.push(() => {
+      graph.off('add remove change:position change:size', autoFitCanvas);
+      newPaper.off('scale', autoFitCanvas);
+      resizeObserver.disconnect();
+    });
+
+    // 14. Group auto-resize: expand and shrink group to fit children
     const GROUP_PADDING = 40;
     const GROUP_LABEL_HEIGHT = 30; // space for the top-left label
+    const MIN_GROUP_WIDTH = 300;
+    const MIN_GROUP_HEIGHT = 200;
 
     const autoResizeGroup = (groupId: string | dia.Cell.ID) => {
       const group = graph.getCell(groupId);
       if (!group || !group.isElement() || !group.get('isGroup')) return;
 
       const children = (group as dia.Element).getEmbeddedCells() as dia.Element[];
-      if (children.length === 0) return;
+      const groupPos = (group as dia.Element).position();
+      const groupSize = (group as dia.Element).size();
+
+      // If empty, snap back to default 300x200 size at current pos
+      if (children.length === 0) {
+        if (groupSize.width !== MIN_GROUP_WIDTH || groupSize.height !== MIN_GROUP_HEIGHT) {
+           (group as dia.Element).set({
+             size: { width: MIN_GROUP_WIDTH, height: MIN_GROUP_HEIGHT },
+           }, { skipParentResize: true });
+        }
+        return;
+      }
 
       // Calculate bounding box of all children
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -243,20 +283,17 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
       if (!isFinite(minX)) return;
 
-      const groupPos = (group as dia.Element).position();
-      const groupSize = (group as dia.Element).size();
-
       // Desired bounds with padding
       const desiredX = minX - GROUP_PADDING;
       const desiredY = minY - GROUP_PADDING - GROUP_LABEL_HEIGHT;
       const desiredW = (maxX - minX) + GROUP_PADDING * 2;
       const desiredH = (maxY - minY) + GROUP_PADDING * 2 + GROUP_LABEL_HEIGHT;
 
-      // Only expand, never shrink below current or desired
-      const newX = Math.min(groupPos.x, desiredX);
-      const newY = Math.min(groupPos.y, desiredY);
-      const newW = Math.max(groupSize.width, desiredW, groupPos.x + groupSize.width - newX);
-      const newH = Math.max(groupSize.height, desiredH, groupPos.y + groupSize.height - newY);
+      // Bi-directional scaling with minimum constraints
+      const newX = desiredX;
+      const newY = desiredY;
+      const newW = Math.max(MIN_GROUP_WIDTH, desiredW);
+      const newH = Math.max(MIN_GROUP_HEIGHT, desiredH);
 
       // Apply if changed
       if (newX !== groupPos.x || newY !== groupPos.y || newW !== groupSize.width || newH !== groupSize.height) {
@@ -352,19 +389,23 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
         const linkView = currentPaper.findViewByModel(link) as dia.LinkView;
         if (!linkView) continue;
 
-        // Try to find the closest point on the link connection path
-        // For simplicity, we check if the element's center is close to the link's bounding box
-        // A more robust approach would use geometry intersections, but this works for basic dropping
-        const linkBBox = linkView.getBBox();
+        // Find the closest point on the actual link path to the element's center
         const center = elementBBox.center();
         
-        // Check if the center of the dropped element is inside the link's bounding box (with some padding)
-        const paddedLinkBBox = linkBBox.inflate(10);
-        
-        if (paddedLinkBBox.containsPoint(center)) {
-          // It's close enough to trigger insert
-          targetLink = link;
-          break; // Take the first one we find
+        try {
+          const closestPoint = linkView.getClosestPoint(center);
+          if (closestPoint) {
+            // Calculate actual distance between the dropped element's center and the link's path
+            // We use a threshold of 40px (roughly half a node's height)
+            const distance = center.distance(closestPoint);
+            if (distance < 40 && distance < minDistance) {
+              minDistance = distance;
+              targetLink = link;
+            }
+          }
+        } catch (e) {
+          // Fallback if getClosestPoint throws (e.g. unrendered link)
+          console.warn('Could not calculate distance to link', e);
         }
       }
 
@@ -375,10 +416,15 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
         // 1. Add the new element to the graph
         graph.addCell(element);
 
+        // Dynamically find ports on the newly dropped element
+        const elementPorts = element.getPorts();
+        const elementInPort = elementPorts.find(p => p.group === 'in')?.id || 'in1';
+        const elementOutPort = elementPorts.find(p => p.group === 'out')?.id || 'out1';
+
         // 2. Create link from original source -> new element
         const newLink1 = new shapes.standard.Link({
           source: source,
-          target: { id: element.id, port: 'in1' },
+          target: { id: element.id, port: elementInPort },
           attrs: {
             line: {
               stroke: '#A262FF', // Default link styling
@@ -387,13 +433,13 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
               strokeDasharray: '0',
             },
           },
-          router: { name: 'manhattan' },
-          connector: { name: 'rounded' },
+          router: getObstacleRouterConfig(graph),
+          connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
         });
 
         // 3. Create link from new element -> original target
         const newLink2 = new shapes.standard.Link({
-          source: { id: element.id, port: 'out1' },
+          source: { id: element.id, port: elementOutPort },
           target: target,
           attrs: {
             line: {
@@ -403,8 +449,8 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
               strokeDasharray: '0',
             },
           },
-          router: { name: 'manhattan' },
-          connector: { name: 'rounded' },
+          router: getObstacleRouterConfig(graph),
+          connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
         });
 
         // 4. Copy routing/connection attributes if needed
@@ -446,7 +492,6 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       onDragOver={onDragOver}
     >
       <PaperWrapper ref={paperContainerRef} />
-      {paper && <CanvasScrollbars paper={paper} graph={graph} />}
     </CanvasContainer>
   );
 }
