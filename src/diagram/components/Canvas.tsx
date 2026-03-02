@@ -218,6 +218,78 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     // 12. Link Tools (vertex / segment / arrowhead handles)
     cleanups.push(setupLinkTools(newPaper, graph));
 
+    // 13. Group auto-resize: expand group to fit children
+    const GROUP_PADDING = 40;
+    const GROUP_LABEL_HEIGHT = 30; // space for the top-left label
+
+    const autoResizeGroup = (groupId: string | dia.Cell.ID) => {
+      const group = graph.getCell(groupId);
+      if (!group || !group.isElement() || !group.get('isGroup')) return;
+
+      const children = (group as dia.Element).getEmbeddedCells() as dia.Element[];
+      if (children.length === 0) return;
+
+      // Calculate bounding box of all children
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      children.forEach(child => {
+        if (!child.isElement()) return;
+        const pos = child.position();
+        const size = child.size();
+        minX = Math.min(minX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxX = Math.max(maxX, pos.x + size.width);
+        maxY = Math.max(maxY, pos.y + size.height);
+      });
+
+      if (!isFinite(minX)) return;
+
+      const groupPos = (group as dia.Element).position();
+      const groupSize = (group as dia.Element).size();
+
+      // Desired bounds with padding
+      const desiredX = minX - GROUP_PADDING;
+      const desiredY = minY - GROUP_PADDING - GROUP_LABEL_HEIGHT;
+      const desiredW = (maxX - minX) + GROUP_PADDING * 2;
+      const desiredH = (maxY - minY) + GROUP_PADDING * 2 + GROUP_LABEL_HEIGHT;
+
+      // Only expand, never shrink below current or desired
+      const newX = Math.min(groupPos.x, desiredX);
+      const newY = Math.min(groupPos.y, desiredY);
+      const newW = Math.max(groupSize.width, desiredW, groupPos.x + groupSize.width - newX);
+      const newH = Math.max(groupSize.height, desiredH, groupPos.y + groupSize.height - newY);
+
+      // Apply if changed
+      if (newX !== groupPos.x || newY !== groupPos.y || newW !== groupSize.width || newH !== groupSize.height) {
+        (group as dia.Element).set({
+          position: { x: newX, y: newY },
+          size: { width: newW, height: newH },
+        }, { skipParentResize: true });
+      }
+    };
+
+    const onParentChange = (cell: dia.Cell) => {
+      const parentId = cell.get('parent');
+      if (parentId) autoResizeGroup(parentId);
+      // Also resize old parent if element was moved out
+      const prev = cell.previous('parent');
+      if (prev) autoResizeGroup(prev);
+    };
+
+    const onChildMove = (cell: dia.Cell, _: unknown, opt: Record<string, unknown>) => {
+      if (opt?.skipParentResize) return;
+      const parentId = cell.get('parent');
+      if (parentId) autoResizeGroup(parentId);
+    };
+
+    graph.on('change:parent', onParentChange);
+    graph.on('change:position', onChildMove);
+    graph.on('change:size', onChildMove);
+    cleanups.push(() => {
+      graph.off('change:parent', onParentChange);
+      graph.off('change:position', onChildMove);
+      graph.off('change:size', onChildMove);
+    });
+
     // 13. Configuration Modal listener
     newPaper.on('element:configure', (elementView: dia.ElementView | dia.Element) => {
       // It might pass the element directly depending on how we triggered it
@@ -444,6 +516,36 @@ function createElementFromPalette(
   label: string,
 ): dia.Element {
   switch (type) {
+    // ── GROUP CONTAINER ─────────────────────────────────────
+    case 'group':
+      return new shapes.standard.Rectangle({
+        position: { x, y },
+        size: { width: 300, height: 200 },
+        isGroup: true, // Custom flag used by validateEmbedding
+        attrs: {
+          body: {
+            fill: 'rgba(155, 89, 182, 0.04)',
+            stroke: '#9B59B6',
+            strokeWidth: 2,
+            strokeDasharray: '8 4',
+            rx: 8,
+            ry: 8,
+          },
+          label: {
+            text: label || 'Group',
+            fill: '#9B59B6',
+            fontSize: 13,
+            fontWeight: 600,
+            fontFamily: FONT,
+            refX: 12,
+            refY: 12,
+            textAnchor: 'start',
+            textVerticalAnchor: 'top',
+          },
+        },
+        // No ports on groups — they're containers, not connectable nodes
+      });
+
     case 'httpConnector':
       return new shapes.standard.Rectangle({
         position: { x, y },

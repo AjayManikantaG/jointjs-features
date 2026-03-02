@@ -55,6 +55,7 @@ export class UndoRedoManager {
     private isExecuting = false; // Prevents recording undo/redo operations
     private currentBatch: Command[] | null = null;
     private batchDepth = 0;
+    private autoBatchDepth = 0; // Tracks JointJS internal batches
     private listeners: StateChangeCallback[] = [];
     private graphListeners: (() => void)[] = [];
     private maxStackSize = 100; // Limit memory usage
@@ -119,9 +120,11 @@ export class UndoRedoManager {
 
             // Only capture the delta
             Object.keys(changed).forEach((key) => {
-                // Skip internal/computed properties if necessary, but keep core attributes
-                previousState[key] = JSON.parse(JSON.stringify(prevAttrs[key]));
-                newState[key] = JSON.parse(JSON.stringify(cell.get(key)));
+                // Guard: undefined can't be round-tripped through JSON
+                const prev = prevAttrs[key];
+                const curr = cell.get(key);
+                previousState[key] = prev !== undefined ? JSON.parse(JSON.stringify(prev)) : null;
+                newState[key] = curr !== undefined ? JSON.parse(JSON.stringify(curr)) : null;
             });
 
             this.pushCommand({
@@ -132,15 +135,45 @@ export class UndoRedoManager {
             });
         };
 
+        // Auto-batch JointJS internal operations (drag, connect, resize, etc.)
+        // JointJS fires batch:start/batch:stop around pointer drags and connections.
+        // By hooking into these, one drag = one undo step instead of one per frame.
+        const onBatchStart = (evt: { batchName: string }) => {
+            if (this.isExecuting) return;
+            // Only auto-batch pointer-related operations
+            const name = evt?.batchName || '';
+            if (name === 'pointer' || name === 'add-link' || name === 'resize') {
+                this.autoBatchDepth++;
+                if (this.autoBatchDepth === 1) {
+                    this.startBatch(name);
+                }
+            }
+        };
+
+        const onBatchStop = (evt: { batchName: string }) => {
+            if (this.isExecuting) return;
+            const name = evt?.batchName || '';
+            if (name === 'pointer' || name === 'add-link' || name === 'resize') {
+                this.autoBatchDepth = Math.max(0, this.autoBatchDepth - 1);
+                if (this.autoBatchDepth === 0) {
+                    this.stopBatch();
+                }
+            }
+        };
+
         this.graph.on('add', onAdd);
         this.graph.on('remove', onRemove);
         this.graph.on('change', onChange);
+        this.graph.on('batch:start', onBatchStart);
+        this.graph.on('batch:stop', onBatchStop);
 
         // Store cleanup functions
         this.graphListeners = [
             () => this.graph.off('add', onAdd),
             () => this.graph.off('remove', onRemove),
             () => this.graph.off('change', onChange),
+            () => this.graph.off('batch:start', onBatchStart),
+            () => this.graph.off('batch:stop', onBatchStop),
         ];
     }
 

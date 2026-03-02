@@ -189,6 +189,19 @@ export default function Palette() {
         </svg>
       </DraggableShape>
 
+      {/* Group Container */}
+      <DraggableShape
+        title="Group"
+        draggable
+        onDragStart={(e) => onDragStart(e, 'group', 'Group')}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="#9B59B6" strokeWidth="2">
+          <rect x="2" y="2" width="20" height="20" rx="2" strokeDasharray="4 2" />
+          <rect x="6" y="8" width="5" height="5" rx="1" fill="rgba(155,89,182,0.15)" />
+          <rect x="13" y="8" width="5" height="5" rx="1" fill="rgba(155,89,182,0.15)" />
+        </svg>
+      </DraggableShape>
+
       <Divider />
 
       {/* Fit Content Action */}

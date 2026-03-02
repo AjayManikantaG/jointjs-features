@@ -67,6 +67,12 @@ export const GlobalStyles = createGlobalStyle`
     cursor: move;
   }
 
+  /* GPU-accelerated rendering for smooth drag */
+  .joint-element {
+    will-change: transform;
+    shape-rendering: geometricPrecision;
+  }
+
   /* Element label text */
   .joint-element text,
   .joint-element .joint-label {

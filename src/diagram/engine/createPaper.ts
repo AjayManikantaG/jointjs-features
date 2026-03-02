@@ -63,6 +63,14 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
         background,
         cellViewNamespace: shapes,
 
+        // Enable embedding — allows elements to be parented inside groups
+        embeddingMode: true,
+        frontParentOnly: true,
+        validateEmbedding: (childView: dia.ElementView, parentView: dia.ElementView) => {
+            // Only allow embedding into Group elements
+            return parentView.model.get('isGroup') === true;
+        },
+
         // Snap elements to grid on move
         snapLabels: true,
 
