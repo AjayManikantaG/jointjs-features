@@ -11,7 +11,6 @@
  * - Default link styling and router configuration
  */
 import { dia, shapes } from '@joint/core';
-import { getObstacleRouterConfig } from './obstacleRouter';
 
 /** Options for paper creation */
 export interface CreatePaperOptions {
@@ -92,8 +91,8 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
                         },
                     },
                 },
-                // Apply obstacle-aware routing by default
-                router: getObstacleRouterConfig(graph),
+                // Apply normal routing by default
+                router: { name: 'normal' },
                 connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
             }),
 

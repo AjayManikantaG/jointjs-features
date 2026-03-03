@@ -1394,3 +1394,154 @@ export function setupMultiSelectionMove(
         paper.off('element:pointerup', onPointerUp);
     };
 }
+
+// ============================================================
+// DROP ON LINK
+// ============================================================
+
+/**
+ * Allows dropping an element onto an existing link to split it.
+ */
+export function setupDropOnLink(
+    paper: dia.Paper,
+    graph: dia.Graph,
+    commandManager?: UndoRedoManager,
+): () => void {
+    let highlightedLinkView: dia.LinkView | null = null;
+    let isDragging = false;
+
+    const clearHighlight = () => {
+        if (highlightedLinkView) {
+            highlightedLinkView.unhighlight();
+            const path = highlightedLinkView.el.querySelector('path.line') as SVGElement;
+            if (path) {
+                path.style.stroke = '';
+                path.style.strokeWidth = '';
+            }
+            highlightedLinkView = null;
+        }
+    };
+
+    const onPointerDown = () => {
+        isDragging = true;
+    };
+
+    const onPointerMove = (elementView: dia.ElementView, evt: dia.Event, x: number, y: number) => {
+        if (!isDragging) return;
+
+        const element = elementView.model as dia.Element;
+        const bbox = element.getBBox();
+        const center = bbox.center();
+
+        let targetLinkView: dia.LinkView | null = null;
+        let minDistance = Infinity;
+
+        const links = graph.getLinks();
+        for (const link of links) {
+            const linkView = paper.findViewByModel(link) as dia.LinkView | null;
+            if (!linkView) continue;
+
+            try {
+                const closestPoint = linkView.getClosestPoint(center);
+                if (closestPoint) {
+                    const distance = center.distance(closestPoint);
+                    if (distance < 40 && distance < minDistance) {
+                        minDistance = distance;
+                        targetLinkView = linkView;
+                    }
+                }
+            } catch (e) {
+                // Ignore errors from unrendered links
+            }
+        }
+
+        if (targetLinkView !== highlightedLinkView) {
+            clearHighlight();
+            if (targetLinkView) {
+                targetLinkView.highlight();
+                const path = targetLinkView.el.querySelector('path.line') as SVGElement;
+                if (path) {
+                    path.style.stroke = '#2196F3'; // Blue highlight
+                    path.style.strokeWidth = '4px';
+                }
+                highlightedLinkView = targetLinkView;
+            }
+        }
+    };
+
+    const onPointerUp = (elementView: dia.ElementView) => {
+        isDragging = false;
+
+        if (highlightedLinkView) {
+            const element = elementView.model as dia.Element;
+            const targetLink = highlightedLinkView.model;
+            
+            clearHighlight();
+
+            const source = targetLink.source();
+            const target = targetLink.target();
+
+            // Dynamically find ports
+            const elementPorts = element.getPorts();
+            const elementInPort = elementPorts.find(p => p.group === 'in')?.id || 'in1';
+            const elementOutPort = elementPorts.find(p => p.group === 'out')?.id || 'out1';
+
+            import('@joint/core').then(({ shapes }) => {
+                const newLink1 = new shapes.standard.Link({
+                    source: source,
+                    target: { id: element.id, port: elementInPort },
+                    attrs: {
+                        line: {
+                            stroke: '#A262FF',
+                            strokeWidth: 2,
+                            targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
+                            strokeDasharray: '0',
+                        },
+                    },
+                    router: { name: 'normal' },
+                    connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
+                });
+
+                const newLink2 = new shapes.standard.Link({
+                    source: { id: element.id, port: elementOutPort },
+                    target: target,
+                    attrs: {
+                        line: {
+                            stroke: '#A262FF',
+                            strokeWidth: 2,
+                            targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
+                            strokeDasharray: '0',
+                        },
+                    },
+                    router: { name: 'normal' },
+                    connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
+                });
+
+                if (targetLink.get('router')) newLink1.set('router', targetLink.get('router'));
+                if (targetLink.get('connector')) newLink1.set('connector', targetLink.get('connector'));
+                if (targetLink.get('router')) newLink2.set('router', targetLink.get('router'));
+                if (targetLink.get('connector')) newLink2.set('connector', targetLink.get('connector'));
+
+                if (commandManager) commandManager.startBatch('auto-insert-link');
+                graph.startBatch('auto-insert-link');
+                
+                targetLink.remove();
+                graph.addCells([newLink1, newLink2]);
+                
+                graph.stopBatch('auto-insert-link');
+                if (commandManager) commandManager.stopBatch();
+            });
+        }
+    };
+
+    paper.on('element:pointerdown', onPointerDown);
+    paper.on('element:pointermove', onPointerMove);
+    paper.on('element:pointerup', onPointerUp);
+
+    return () => {
+        paper.off('element:pointerdown', onPointerDown);
+        paper.off('element:pointermove', onPointerMove);
+        paper.off('element:pointerup', onPointerUp);
+        clearHighlight();
+    };
+}

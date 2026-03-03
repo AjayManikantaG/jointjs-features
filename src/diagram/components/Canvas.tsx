@@ -1,8 +1,8 @@
 /**
  * Canvas.tsx
- * 
+ *
  * The main diagram canvas component.
- * 
+ *
  * Responsibilities:
  * 1. Renders the container <div> for the JointJS Paper
  * 2. Creates the Paper instance on mount
@@ -11,14 +11,14 @@
  * 5. Sets up obstacle-aware routing listeners
  * 6. Cleans up everything on unmount
  */
-'use client';
+"use client";
 
-import React, { useRef, useEffect, useCallback } from 'react';
-import styled from 'styled-components';
-import { dia, shapes } from '@joint/core';
-import { useDiagram } from '../context/DiagramProvider';
-import { createPaper } from '../engine/createPaper';
-import { applyRoutingListeners, getObstacleRouterConfig } from '../engine/obstacleRouter';
+import React, { useRef, useEffect, useCallback } from "react";
+import styled from "styled-components";
+import { dia, shapes } from "@joint/core";
+import { useDiagram } from "../context/DiagramProvider";
+import { createPaper } from "../engine/createPaper";
+import { applyRoutingListeners } from "../engine/obstacleRouter";
 import {
   setupPanZoom,
   setupLassoSelection,
@@ -31,9 +31,10 @@ import {
   type ContextMenuEvent,
   type TooltipEvent,
   setupMultiSelectionMove,
-} from '../engine/interactions';
-import { setupSnaplines } from '../engine/snaplines';
-import { setupLinkTools } from '../engine/linkTools';
+  setupDropOnLink,
+} from "../engine/interactions";
+import { setupSnaplines } from "../engine/snaplines";
+import { setupLinkTools } from "../engine/linkTools";
 
 // ============================================================
 // STYLED COMPONENTS
@@ -67,7 +68,12 @@ interface CanvasProps {
   onConfigure?: (cell: dia.Cell) => void;
 }
 
-export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, onConfigure }: CanvasProps) {
+export default function Canvas({
+  onContextMenu,
+  onTooltipShow,
+  onTooltipHide,
+  onConfigure,
+}: CanvasProps) {
   const paperContainerRef = useRef<HTMLDivElement>(null);
   const {
     graph,
@@ -93,13 +99,13 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
   const onTooltipShowRef = useRef(onTooltipShow);
   const onTooltipHideRef = useRef(onTooltipHide);
   const onConfigureRef = useRef(onConfigure);
-  
+
   const interactionModeRef = useRef(interactionMode);
   interactionModeRef.current = interactionMode;
-  
+
   const doubleClickModeRef = useRef(doubleClickMode);
   doubleClickModeRef.current = doubleClickMode;
-  
+
   onContextMenuRef.current = onContextMenu;
   onTooltipShowRef.current = onTooltipShow;
   onTooltipHideRef.current = onTooltipHide;
@@ -123,24 +129,24 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     // container directly, React Strict Mode re-mount will fail because
     // the ref points to a detached node. By creating a disposable child,
     // only the child is destroyed on cleanup — the React ref stays intact.
-    const paperDiv = document.createElement('div');
-    paperDiv.style.width = '100%';
-    paperDiv.style.height = '100%';
+    const paperDiv = document.createElement("div");
+    paperDiv.style.width = "100%";
+    paperDiv.style.height = "100%";
     container.appendChild(paperDiv);
 
     // Create the paper
     const newPaper = createPaper({
       el: paperDiv,
       graph,
-      drawGrid: { 
-        name: 'dot', 
+      drawGrid: {
+        name: "dot",
         args: [
-          { color: '#C8C8D0', thickness: 2, scaleFactor: 5 },
-          { color: '#C8C8D0', thickness: 2, scaleFactor: 2 },
-          { color: '#C8C8D0', thickness: 1, scaleFactor: 1 },
-          { color: '#C8C8D0', thickness: 1, scaleFactor: 0.5 },
-          { color: '#C8C8D0', thickness: 1, scaleFactor: 0.1 }
-        ]
+          { color: "#C8C8D0", thickness: 2, scaleFactor: 5 },
+          { color: "#C8C8D0", thickness: 2, scaleFactor: 2 },
+          { color: "#C8C8D0", thickness: 1, scaleFactor: 1 },
+          { color: "#C8C8D0", thickness: 1, scaleFactor: 0.5 },
+          { color: "#C8C8D0", thickness: 1, scaleFactor: 0.1 },
+        ],
       },
     });
 
@@ -158,13 +164,21 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
     // 2. Lasso selection (with Ctrl+click multi-select support)
     cleanups.push(
-      setupLassoSelection(newPaper, graph, () => interactionModeRef.current, (cells) => {
-        setSelectedCells(cells);
-      }, () => selectedCellsRef.current),
+      setupLassoSelection(
+        newPaper,
+        graph,
+        () => interactionModeRef.current,
+        (cells) => {
+          setSelectedCells(cells);
+        },
+        () => selectedCellsRef.current,
+      ),
     );
 
     // 3. Double-click to configure
-    cleanups.push(setupDoubleClickSettings(newPaper, () => doubleClickModeRef.current));
+    cleanups.push(
+      setupDoubleClickSettings(newPaper, () => doubleClickModeRef.current),
+    );
 
     // 4. Context menu
     cleanups.push(
@@ -201,9 +215,14 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
     // 8. Resize & Rotate handles
     cleanups.push(
-      setupResizeRotate(newPaper, graph, (cells) => {
-        setSelectedCells(cells);
-      }, undoRedoManager || undefined),
+      setupResizeRotate(
+        newPaper,
+        graph,
+        (cells) => {
+          setSelectedCells(cells);
+        },
+        undoRedoManager || undefined,
+      ),
     );
 
     // 9. Snaplines (Alignment Guides)
@@ -211,27 +230,37 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
     // 10. Multi-selection Drag
     cleanups.push(
-      setupMultiSelectionMove(newPaper, graph, () => selectedCellsRef.current, undoRedoManager || undefined),
+      setupMultiSelectionMove(
+        newPaper,
+        graph,
+        () => selectedCellsRef.current,
+        undoRedoManager || undefined,
+      ),
     );
 
     // 12. Link Tools (vertex / segment / arrowhead handles)
     cleanups.push(setupLinkTools(newPaper, graph));
 
-    // 13. Native Auto-Expanding Canvas
+    // 13. Drop on Link (split link)
+    cleanups.push(
+      setupDropOnLink(newPaper, graph, undoRedoManager || undefined),
+    );
+
+    // 14. Native Auto-Expanding Canvas
     const autoFitCanvas = () => {
       if (!container) return;
       newPaper.fitToContent({
         padding: 100,
-        allowNewOrigin: 'negative',
+        allowNewOrigin: "negative",
         minWidth: container.clientWidth,
         minHeight: container.clientHeight,
       });
     };
 
     // Trigger on structural / positional changes and zooming
-    graph.on('add remove change:position change:size', autoFitCanvas);
-    newPaper.on('scale', autoFitCanvas);
-    
+    graph.on("add remove change:position change:size", autoFitCanvas);
+    newPaper.on("scale", autoFitCanvas);
+
     // Also trigger on window resize so minWidth/minHeight adapt
     const resizeObserver = new ResizeObserver(() => autoFitCanvas());
     resizeObserver.observe(container);
@@ -240,8 +269,8 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
     setTimeout(autoFitCanvas, 10);
 
     cleanups.push(() => {
-      graph.off('add remove change:position change:size', autoFitCanvas);
-      newPaper.off('scale', autoFitCanvas);
+      graph.off("add remove change:position change:size", autoFitCanvas);
+      newPaper.off("scale", autoFitCanvas);
       resizeObserver.disconnect();
     });
 
@@ -253,25 +282,36 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
     const autoResizeGroup = (groupId: string | dia.Cell.ID) => {
       const group = graph.getCell(groupId);
-      if (!group || !group.isElement() || !group.get('isGroup')) return;
+      if (!group || !group.isElement() || !group.get("isGroup")) return;
 
-      const children = (group as dia.Element).getEmbeddedCells() as dia.Element[];
+      const children = (
+        group as dia.Element
+      ).getEmbeddedCells() as dia.Element[];
       const groupPos = (group as dia.Element).position();
       const groupSize = (group as dia.Element).size();
 
       // If empty, snap back to default 300x200 size at current pos
       if (children.length === 0) {
-        if (groupSize.width !== MIN_GROUP_WIDTH || groupSize.height !== MIN_GROUP_HEIGHT) {
-           (group as dia.Element).set({
-             size: { width: MIN_GROUP_WIDTH, height: MIN_GROUP_HEIGHT },
-           }, { skipParentResize: true });
+        if (
+          groupSize.width !== MIN_GROUP_WIDTH ||
+          groupSize.height !== MIN_GROUP_HEIGHT
+        ) {
+          (group as dia.Element).set(
+            {
+              size: { width: MIN_GROUP_WIDTH, height: MIN_GROUP_HEIGHT },
+            },
+            { skipParentResize: true },
+          );
         }
         return;
       }
 
       // Calculate bounding box of all children
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      children.forEach(child => {
+      let minX = Infinity,
+        minY = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity;
+      children.forEach((child) => {
         if (!child.isElement()) return;
         const pos = child.position();
         const size = child.size();
@@ -286,8 +326,8 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       // Desired bounds with padding
       const desiredX = minX - GROUP_PADDING;
       const desiredY = minY - GROUP_PADDING - GROUP_LABEL_HEIGHT;
-      const desiredW = (maxX - minX) + GROUP_PADDING * 2;
-      const desiredH = (maxY - minY) + GROUP_PADDING * 2 + GROUP_LABEL_HEIGHT;
+      const desiredW = maxX - minX + GROUP_PADDING * 2;
+      const desiredH = maxY - minY + GROUP_PADDING * 2 + GROUP_LABEL_HEIGHT;
 
       // Bi-directional scaling with minimum constraints
       const newX = desiredX;
@@ -296,56 +336,75 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       const newH = Math.max(MIN_GROUP_HEIGHT, desiredH);
 
       // Apply if changed
-      if (newX !== groupPos.x || newY !== groupPos.y || newW !== groupSize.width || newH !== groupSize.height) {
-        (group as dia.Element).set({
-          position: { x: newX, y: newY },
-          size: { width: newW, height: newH },
-        }, { skipParentResize: true });
+      if (
+        newX !== groupPos.x ||
+        newY !== groupPos.y ||
+        newW !== groupSize.width ||
+        newH !== groupSize.height
+      ) {
+        (group as dia.Element).set(
+          {
+            position: { x: newX, y: newY },
+            size: { width: newW, height: newH },
+          },
+          { skipParentResize: true },
+        );
       }
     };
 
     const onParentChange = (cell: dia.Cell) => {
-      const parentId = cell.get('parent');
+      const parentId = cell.get("parent");
       if (parentId) autoResizeGroup(parentId);
       // Also resize old parent if element was moved out
-      const prev = cell.previous('parent');
+      const prev = cell.previous("parent");
       if (prev) autoResizeGroup(prev);
     };
 
-    const onChildMove = (cell: dia.Cell, _: unknown, opt: Record<string, unknown>) => {
+    const onChildMove = (
+      cell: dia.Cell,
+      _: unknown,
+      opt: Record<string, unknown>,
+    ) => {
       if (opt?.skipParentResize) return;
-      const parentId = cell.get('parent');
+      const parentId = cell.get("parent");
       if (parentId) autoResizeGroup(parentId);
     };
 
-    graph.on('change:parent', onParentChange);
-    graph.on('change:position', onChildMove);
-    graph.on('change:size', onChildMove);
+    graph.on("change:parent", onParentChange);
+    graph.on("change:position", onChildMove);
+    graph.on("change:size", onChildMove);
     cleanups.push(() => {
-      graph.off('change:parent', onParentChange);
-      graph.off('change:position', onChildMove);
-      graph.off('change:size', onChildMove);
+      graph.off("change:parent", onParentChange);
+      graph.off("change:position", onChildMove);
+      graph.off("change:size", onChildMove);
     });
 
     // 13. Configuration Modal listener
-    newPaper.on('element:configure', (elementView: dia.ElementView | dia.Element) => {
-      // It might pass the element directly depending on how we triggered it
-      const cell = elementView instanceof dia.Element ? elementView : elementView.model;
-      if (onConfigureRef.current) {
-        onConfigureRef.current(cell);
-      }
-    });
+    newPaper.on(
+      "element:configure",
+      (elementView: dia.ElementView | dia.Element) => {
+        // It might pass the element directly depending on how we triggered it
+        const cell =
+          elementView instanceof dia.Element ? elementView : elementView.model;
+        if (onConfigureRef.current) {
+          onConfigureRef.current(cell);
+        }
+      },
+    );
 
     // Center the paper view
     const containerRect = container.getBoundingClientRect();
-    newPaper.translate(containerRect.width / 2 - 200, containerRect.height / 2 - 200);
+    newPaper.translate(
+      containerRect.width / 2 - 200,
+      containerRect.height / 2 - 200,
+    );
 
     // Cleanup
     return () => {
       cleanups.forEach((fn) => fn());
       newPaper.remove(); // Only removes the disposable paperDiv, not the React container
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph]);
 
   // Update highlights when selection changes
@@ -362,7 +421,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       const currentPaper = paperRef.current;
       if (!currentPaper) return;
 
-      const data = e.dataTransfer.getData('application/diagram-node');
+      const data = e.dataTransfer.getData("application/diagram-node");
       if (!data) return;
 
       const nodeData = JSON.parse(data);
@@ -376,8 +435,13 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
       const snappedY = Math.round(localPoint.y / 20) * 20;
 
       // Create the element based on type
-      const element = createElementFromPalette(nodeData.type, snappedX, snappedY, nodeData.label);
-      
+      const element = createElementFromPalette(
+        nodeData.type,
+        snappedX,
+        snappedY,
+        nodeData.label,
+      );
+
       // AUTO-INSERT ON LINK LOGIC
       // Check if dropped near any existing links
       const elementBBox = element.getBBox();
@@ -391,7 +455,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
         // Find the closest point on the actual link path to the element's center
         const center = elementBBox.center();
-        
+
         try {
           const closestPoint = linkView.getClosestPoint(center);
           if (closestPoint) {
@@ -405,7 +469,7 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
           }
         } catch (e) {
           // Fallback if getClosestPoint throws (e.g. unrendered link)
-          console.warn('Could not calculate distance to link', e);
+          console.warn("Could not calculate distance to link", e);
         }
       }
 
@@ -418,8 +482,10 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 
         // Dynamically find ports on the newly dropped element
         const elementPorts = element.getPorts();
-        const elementInPort = elementPorts.find(p => p.group === 'in')?.id || 'in1';
-        const elementOutPort = elementPorts.find(p => p.group === 'out')?.id || 'out1';
+        const elementInPort =
+          elementPorts.find((p) => p.group === "in")?.id || "in1";
+        const elementOutPort =
+          elementPorts.find((p) => p.group === "out")?.id || "out1";
 
         // 2. Create link from original source -> new element
         const newLink1 = new shapes.standard.Link({
@@ -427,14 +493,21 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
           target: { id: element.id, port: elementInPort },
           attrs: {
             line: {
-              stroke: '#A262FF', // Default link styling
+              stroke: "#A262FF", // Default link styling
               strokeWidth: 2,
-              targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
-              strokeDasharray: '0',
+              targetMarker: {
+                type: "path",
+                d: "M 10 -5 0 0 10 5 Z",
+                fill: "#A262FF",
+              },
+              strokeDasharray: "0",
             },
           },
-          router: getObstacleRouterConfig(graph),
-          connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
+          router: { name: "normal" },
+          connector: {
+            name: "jumpover",
+            args: { jump: "arc", radius: 8, size: 8 },
+          },
         });
 
         // 3. Create link from new element -> original target
@@ -443,28 +516,38 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
           target: target,
           attrs: {
             line: {
-              stroke: '#A262FF',
+              stroke: "#A262FF",
               strokeWidth: 2,
-              targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
-              strokeDasharray: '0',
+              targetMarker: {
+                type: "path",
+                d: "M 10 -5 0 0 10 5 Z",
+                fill: "#A262FF",
+              },
+              strokeDasharray: "0",
             },
           },
-          router: getObstacleRouterConfig(graph),
-          connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
+          router: { name: "normal" },
+          connector: {
+            name: "jumpover",
+            args: { jump: "arc", radius: 8, size: 8 },
+          },
         });
 
         // 4. Copy routing/connection attributes if needed
-        if (targetLink.get('router')) newLink1.set('router', targetLink.get('router'));
-        if (targetLink.get('connector')) newLink1.set('connector', targetLink.get('connector'));
-        if (targetLink.get('router')) newLink2.set('router', targetLink.get('router'));
-        if (targetLink.get('connector')) newLink2.set('connector', targetLink.get('connector'));
+        if (targetLink.get("router"))
+          newLink1.set("router", targetLink.get("router"));
+        if (targetLink.get("connector"))
+          newLink1.set("connector", targetLink.get("connector"));
+        if (targetLink.get("router"))
+          newLink2.set("router", targetLink.get("router"));
+        if (targetLink.get("connector"))
+          newLink2.set("connector", targetLink.get("connector"));
 
         // 5. Add new links and remove the old one (wrapped in a batch for undo)
-        graph.startBatch('auto-insert-link');
+        graph.startBatch("auto-insert-link");
         targetLink.remove();
         graph.addCells([newLink1, newLink2]);
-        graph.stopBatch('auto-insert-link');
-        
+        graph.stopBatch("auto-insert-link");
       } else {
         // Normal drop, just add the element
         graph.addCell(element);
@@ -476,13 +559,13 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
   // Handle drag enter to allow drop in all browsers
   const onDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = "copy";
   }, []);
 
   // Handle drag over to allow drop
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = "copy";
   }, []);
 
   return (
@@ -504,11 +587,11 @@ export default function Canvas({ onContextMenu, onTooltipShow, onTooltipHide, on
 const BPM_PORT_CONFIG = {
   groups: {
     in: {
-      position: 'left',
+      position: "left",
       attrs: {
         circle: {
-          fill: '#232329',
-          stroke: '#7B61FF',
+          fill: "#232329",
+          stroke: "#7B61FF",
           strokeWidth: 2,
           r: 6,
           magnet: true,
@@ -516,11 +599,11 @@ const BPM_PORT_CONFIG = {
       },
     },
     out: {
-      position: 'right',
+      position: "right",
       attrs: {
         circle: {
-          fill: '#232329',
-          stroke: '#7B61FF',
+          fill: "#232329",
+          stroke: "#7B61FF",
           strokeWidth: 2,
           r: 6,
           magnet: true,
@@ -529,23 +612,19 @@ const BPM_PORT_CONFIG = {
     },
   },
   items: [
-    { group: 'in', id: 'in1' },
-    { group: 'out', id: 'out1' },
+    { group: "in", id: "in1" },
+    { group: "out", id: "out1" },
   ],
 };
 
 const START_PORT_CONFIG = {
   ...BPM_PORT_CONFIG,
-  items: [
-    { group: 'out', id: 'out1' },
-  ],
+  items: [{ group: "out", id: "out1" }],
 };
 
 const END_PORT_CONFIG = {
   ...BPM_PORT_CONFIG,
-  items: [
-    { group: 'in', id: 'in1' },
-  ],
+  items: [{ group: "in", id: "in1" }],
 };
 
 const FONT = "'Inter', sans-serif";
@@ -562,53 +641,53 @@ function createElementFromPalette(
 ): dia.Element {
   switch (type) {
     // ── GROUP CONTAINER ─────────────────────────────────────
-    case 'group':
+    case "group":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 300, height: 200 },
         isGroup: true, // Custom flag used by validateEmbedding
         attrs: {
           body: {
-            fill: 'rgba(155, 89, 182, 0.04)',
-            stroke: '#9B59B6',
+            fill: "rgba(155, 89, 182, 0.04)",
+            stroke: "#9B59B6",
             strokeWidth: 2,
-            strokeDasharray: '8 4',
+            strokeDasharray: "8 4",
             rx: 8,
             ry: 8,
           },
           label: {
-            text: label || 'Group',
-            fill: '#9B59B6',
+            text: label || "Group",
+            fill: "#9B59B6",
             fontSize: 13,
             fontWeight: 600,
             fontFamily: FONT,
             refX: 12,
             refY: 12,
-            textAnchor: 'start',
-            textVerticalAnchor: 'top',
+            textAnchor: "start",
+            textVerticalAnchor: "top",
           },
         },
         // No ports on groups — they're containers, not connectable nodes
       });
 
-    case 'httpConnector':
+    case "httpConnector":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 80, height: 40 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#4A90E2',
+            fill: "#F5F7FA",
+            stroke: "#4A90E2",
             strokeWidth: 2,
             rx: 4,
             ry: 4,
           },
           label: {
-            text: label || 'HTTP',
-            fill: '#1A1A1A',
+            text: label || "HTTP",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -616,23 +695,23 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'module':
+    case "module":
       return new shapes.standard.Polygon({
         position: { x, y },
         size: { width: 80, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#7CB342', // Green stroke like in the image
+            fill: "#F5F7FA",
+            stroke: "#7CB342", // Green stroke like in the image
             strokeWidth: 2,
-            refPoints: '20,0 80,0 100,20 100,80 80,100 20,100 0,80 0,20',
+            refPoints: "20,0 80,0 100,20 100,80 80,100 20,100 0,80 0,20",
           },
           label: {
-            text: label || 'Module',
-            fill: '#1A1A1A',
+            text: label || "Module",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10, // Positioned above the shape
           },
@@ -641,22 +720,22 @@ function createElementFromPalette(
       });
 
     // ── EVENTS ─────────────────────────────────────────────
-    case 'startEvent':
+    case "startEvent":
       return new shapes.standard.Circle({
         position: { x, y },
         size: { width: 60, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#2DD4A8',
+            fill: "#F5F7FA",
+            stroke: "#2DD4A8",
             strokeWidth: 2,
           },
           label: {
-            text: label || 'Start',
-            fill: '#1A1A1A',
+            text: label || "Start",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -664,22 +743,22 @@ function createElementFromPalette(
         ports: START_PORT_CONFIG,
       });
 
-    case 'endEvent':
+    case "endEvent":
       return new shapes.standard.Circle({
         position: { x, y },
         size: { width: 60, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#FF5C5C',
+            fill: "#F5F7FA",
+            stroke: "#FF5C5C",
             strokeWidth: 4,
           },
           label: {
-            text: label || 'End',
-            fill: '#1A1A1A',
+            text: label || "End",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -687,22 +766,22 @@ function createElementFromPalette(
         ports: END_PORT_CONFIG,
       });
 
-    case 'intermediateEvent':
+    case "intermediateEvent":
       return new shapes.standard.Circle({
         position: { x, y },
         size: { width: 60, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#FFB224',
+            fill: "#F5F7FA",
+            stroke: "#FFB224",
             strokeWidth: 2,
           },
           label: {
-            text: label || 'Intermediate',
-            fill: '#1A1A1A',
+            text: label || "Intermediate",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -711,24 +790,24 @@ function createElementFromPalette(
       });
 
     // ── ACTIVITIES ──────────────────────────────────────────
-    case 'task':
+    case "task":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#3A3A44',
+            fill: "#F5F7FA",
+            stroke: "#3A3A44",
             strokeWidth: 1.5,
             rx: 10,
             ry: 10,
           },
           label: {
-            text: label || 'Task',
-            fill: '#1A1A1A',
+            text: label || "Task",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -736,24 +815,24 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'subProcess':
+    case "subProcess":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 180, height: 100 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#3A3A44',
+            fill: "#F5F7FA",
+            stroke: "#3A3A44",
             strokeWidth: 1.5,
             rx: 10,
             ry: 10,
           },
           label: {
-            text: label || 'Sub-Process',
-            fill: '#1A1A1A',
+            text: label || "Sub-Process",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -761,24 +840,24 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'callActivity':
+    case "callActivity":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#9B9BA4',
+            fill: "#F5F7FA",
+            stroke: "#9B9BA4",
             strokeWidth: 3.5,
             rx: 10,
             ry: 10,
           },
           label: {
-            text: label || 'Call Activity',
-            fill: '#1A1A1A',
+            text: label || "Call Activity",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -787,23 +866,23 @@ function createElementFromPalette(
       });
 
     // ── GATEWAYS ────────────────────────────────────────────
-    case 'exclusiveGateway':
+    case "exclusiveGateway":
       return new shapes.standard.Polygon({
         position: { x, y },
         size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#FFB224',
+            fill: "#F5F7FA",
+            stroke: "#FFB224",
             strokeWidth: 2,
-            refPoints: '50,0 100,50 50,100 0,50',
+            refPoints: "50,0 100,50 50,100 0,50",
           },
           label: {
-            text: label || 'Exclusive',
-            fill: '#1A1A1A',
+            text: label || "Exclusive",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -811,23 +890,23 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'parallelGateway':
+    case "parallelGateway":
       return new shapes.standard.Polygon({
         position: { x, y },
         size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#FFB224',
+            fill: "#F5F7FA",
+            stroke: "#FFB224",
             strokeWidth: 2,
-            refPoints: '50,0 100,50 50,100 0,50',
+            refPoints: "50,0 100,50 50,100 0,50",
           },
           label: {
-            text: label || 'Parallel',
-            fill: '#1A1A1A',
+            text: label || "Parallel",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -835,23 +914,23 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'inclusiveGateway':
+    case "inclusiveGateway":
       return new shapes.standard.Polygon({
         position: { x, y },
         size: { width: 80, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#FFB224',
+            fill: "#F5F7FA",
+            stroke: "#FFB224",
             strokeWidth: 2,
-            refPoints: '50,0 100,50 50,100 0,50',
+            refPoints: "50,0 100,50 50,100 0,50",
           },
           label: {
-            text: label || 'Inclusive',
-            fill: '#1A1A1A',
+            text: label || "Inclusive",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -860,24 +939,24 @@ function createElementFromPalette(
       });
 
     // ── DATA ────────────────────────────────────────────────
-    case 'dataObject':
+    case "dataObject":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 80, height: 100 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#9B9BA4',
+            fill: "#F5F7FA",
+            stroke: "#9B9BA4",
             strokeWidth: 1.5,
             rx: 2,
             ry: 2,
           },
           label: {
-            text: label || 'Data Object',
-            fill: '#1A1A1A',
+            text: label || "Data Object",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -885,22 +964,22 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'dataStore':
+    case "dataStore":
       return new shapes.standard.Circle({
         position: { x, y },
         size: { width: 80, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#9B9BA4',
+            fill: "#F5F7FA",
+            stroke: "#9B9BA4",
             strokeWidth: 1.5,
           },
           label: {
-            text: label || 'Data Store',
-            fill: '#1A1A1A',
+            text: label || "Data Store",
+            fill: "#1A1A1A",
             fontSize: 11,
             fontFamily: FONT,
-            textVerticalAnchor: 'bottom',
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -909,25 +988,25 @@ function createElementFromPalette(
       });
 
     // ── BUSINESS OBJECT ──────────────────────────────────────
-    case 'businessObject':
+    case "businessObject":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 140, height: 100 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#4A90E2',
+            fill: "#F5F7FA",
+            stroke: "#4A90E2",
             strokeWidth: 2,
             rx: 2,
             ry: 2,
           },
           label: {
-            text: label || 'Business Object',
-            fill: '#1A1A1A',
+            text: label || "Business Object",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
-            fontWeight: 'bold',
-            textVerticalAnchor: 'bottom',
+            fontWeight: "bold",
+            textVerticalAnchor: "bottom",
             refY: 0,
             y: -10,
           },
@@ -935,42 +1014,42 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'businessAttribute':
+    case "businessAttribute":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 120, height: 40 },
         attrs: {
           body: {
-            fill: 'transparent',
-            stroke: 'transparent',
+            fill: "transparent",
+            stroke: "transparent",
           },
           label: {
-            text: `• ${label || 'Attribute'}`,
-            fill: '#333333',
+            text: `• ${label || "Attribute"}`,
+            fill: "#333333",
             fontSize: 12,
             fontFamily: FONT,
-            textAnchor: 'start',
+            textAnchor: "start",
             refX: 10,
           },
         },
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'businessMethod':
+    case "businessMethod":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 120, height: 40 },
         attrs: {
           body: {
-            fill: 'transparent',
-            stroke: 'transparent',
+            fill: "transparent",
+            stroke: "transparent",
           },
           label: {
-            text: `+ ${label || 'Method'}()`,
-            fill: '#333333',
+            text: `+ ${label || "Method"}()`,
+            fill: "#333333",
             fontSize: 12,
             fontFamily: FONT,
-            textAnchor: 'start',
+            textAnchor: "start",
             refX: 10,
           },
         },
@@ -978,46 +1057,46 @@ function createElementFromPalette(
       });
 
     // ── ORGANIZATION ─────────────────────────────────────────
-    case 'orgUnit':
+    case "orgUnit":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#F5A623',
+            fill: "#F5F7FA",
+            stroke: "#F5A623",
             strokeWidth: 2,
             rx: 4,
             ry: 4,
           },
           label: {
-            text: label || 'Org Unit',
-            fill: '#1A1A1A',
+            text: label || "Org Unit",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
-            fontWeight: 'bold',
+            fontWeight: "bold",
             refY: -25,
           },
         },
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'orgRole':
+    case "orgRole":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 140, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#F5A623',
+            fill: "#F5F7FA",
+            stroke: "#F5A623",
             strokeWidth: 1.5,
-            strokeDasharray: '4,4',
+            strokeDasharray: "4,4",
             rx: 4,
             ry: 4,
           },
           label: {
-            text: label || 'Role',
-            fill: '#1A1A1A',
+            text: label || "Role",
+            fill: "#1A1A1A",
             fontSize: 12,
             fontFamily: FONT,
             refY: -20,
@@ -1026,21 +1105,21 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'orgPerson':
-      return new shapes.standard.Rectangle({ 
+    case "orgPerson":
+      return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 120, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#F5A623',
+            fill: "#F5F7FA",
+            stroke: "#F5A623",
             strokeWidth: 1.5,
             rx: 10,
             ry: 10,
           },
           label: {
-            text: label || 'Person',
-            fill: '#1A1A1A',
+            text: label || "Person",
+            fill: "#1A1A1A",
             fontSize: 12,
             fontFamily: FONT,
             refY: -20,
@@ -1049,20 +1128,20 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'orgLocation':
+    case "orgLocation":
       return new shapes.standard.Polygon({
         position: { x, y },
         size: { width: 100, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#F5A623',
+            fill: "#F5F7FA",
+            stroke: "#F5A623",
             strokeWidth: 1.5,
-            refPoints: '0,0 100,0 100,60 50,100 0,60', // Pin shape
+            refPoints: "0,0 100,0 100,60 50,100 0,60", // Pin shape
           },
           label: {
-            text: label || 'Location',
-            fill: '#1A1A1A',
+            text: label || "Location",
+            fill: "#1A1A1A",
             fontSize: 12,
             fontFamily: FONT,
             refY: -20,
@@ -1072,48 +1151,48 @@ function createElementFromPalette(
       });
 
     // ── SYSTEM ARCHITECTURE ──────────────────────────────────
-    case 'sysITSystem':
+    case "sysITSystem":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 160, height: 100 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#7ED321',
+            fill: "#F5F7FA",
+            stroke: "#7ED321",
             strokeWidth: 2,
             rx: 6,
             ry: 6,
           },
           label: {
-            text: label || 'IT System',
-            fill: '#1A1A1A',
+            text: label || "IT System",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
-            fontWeight: 'bold',
+            fontWeight: "bold",
             refY: -25,
           },
         },
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'sysDatabase':
+    case "sysDatabase":
       return new shapes.standard.Cylinder({
         position: { x, y },
         size: { width: 100, height: 120 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#7ED321',
+            fill: "#F5F7FA",
+            stroke: "#7ED321",
             strokeWidth: 2,
           },
           top: {
-            fill: '#EAEDF1',
-            stroke: '#7ED321',
+            fill: "#EAEDF1",
+            stroke: "#7ED321",
             strokeWidth: 2,
           },
           label: {
-            text: label || 'Database',
-            fill: '#1A1A1A',
+            text: label || "Database",
+            fill: "#1A1A1A",
             fontSize: 12,
             fontFamily: FONT,
             refY: -20,
@@ -1121,32 +1200,33 @@ function createElementFromPalette(
         },
         ports: {
           ...BPM_PORT_CONFIG,
-          items: [ // Adjust port positions for cylinder
-            { group: 'in', id: 'in1', args: { y: '50%' } },
-            { group: 'out', id: 'out1', args: { y: '50%' } },
+          items: [
+            // Adjust port positions for cylinder
+            { group: "in", id: "in1", args: { y: "50%" } },
+            { group: "out", id: "out1", args: { y: "50%" } },
           ],
         },
       });
 
-    case 'sysCluster':
+    case "sysCluster":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 240, height: 160 },
         attrs: {
           body: {
-            fill: 'rgba(126, 211, 33, 0.05)',
-            stroke: '#7ED321',
+            fill: "rgba(126, 211, 33, 0.05)",
+            stroke: "#7ED321",
             strokeWidth: 2,
-            strokeDasharray: '5,5',
+            strokeDasharray: "5,5",
             rx: 10,
             ry: 10,
           },
           label: {
-            text: label || 'Cluster',
-            fill: '#7ED321',
+            text: label || "Cluster",
+            fill: "#7ED321",
             fontSize: 14,
             fontFamily: FONT,
-            fontWeight: 'bold',
+            fontWeight: "bold",
             refY: -30,
           },
         },
@@ -1154,21 +1234,21 @@ function createElementFromPalette(
       });
 
     // ── TECHNICAL ADAPTERS ───────────────────────────────────
-    case 'techDataConverter':
-    case 'techFormatAdapter':
+    case "techDataConverter":
+    case "techFormatAdapter":
       return new shapes.standard.Polygon({
         position: { x, y },
         size: { width: 140, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#BD10E0', // Purple for technical rules/converters
+            fill: "#F5F7FA",
+            stroke: "#BD10E0", // Purple for technical rules/converters
             strokeWidth: 2,
-            refPoints: '0,50 20,0 100,0 120,50 100,100 20,100', // Hexagon
+            refPoints: "0,50 20,0 100,0 120,50 100,100 20,100", // Hexagon
           },
           label: {
-            text: label || 'Converter',
-            fill: '#1A1A1A',
+            text: label || "Converter",
+            fill: "#1A1A1A",
             fontSize: 12,
             fontFamily: FONT,
             refY: -20,
@@ -1177,21 +1257,21 @@ function createElementFromPalette(
         ports: BPM_PORT_CONFIG,
       });
 
-    case 'techSystemConnector':
+    case "techSystemConnector":
       return new shapes.standard.Rectangle({
         position: { x, y },
         size: { width: 120, height: 60 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#BD10E0',
+            fill: "#F5F7FA",
+            stroke: "#BD10E0",
             strokeWidth: 3, // Thicker border for system connectors
             rx: 0,
             ry: 0,
           },
           label: {
-            text: label || 'Connector',
-            fill: '#1A1A1A',
+            text: label || "Connector",
+            fill: "#1A1A1A",
             fontSize: 12,
             fontFamily: FONT,
             refY: -20,
@@ -1206,15 +1286,15 @@ function createElementFromPalette(
         size: { width: 160, height: 80 },
         attrs: {
           body: {
-            fill: '#F5F7FA',
-            stroke: '#3A3A44',
+            fill: "#F5F7FA",
+            stroke: "#3A3A44",
             strokeWidth: 1.5,
             rx: 8,
             ry: 8,
           },
           label: {
-            text: label || 'Node',
-            fill: '#1A1A1A',
+            text: label || "Node",
+            fill: "#1A1A1A",
             fontSize: 13,
             fontFamily: FONT,
             refY: -25,
