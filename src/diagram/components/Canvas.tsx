@@ -19,6 +19,7 @@ import { dia, shapes } from "@joint/core";
 import { useDiagram } from "../context/DiagramProvider";
 import { createPaper } from "../engine/createPaper";
 import { applyRoutingListeners } from "../engine/obstacleRouter";
+import { findClosestLink, splitLinkWithElement } from "../engine/linkUtils";
 import {
   setupPanZoom,
   setupLassoSelection,
@@ -443,113 +444,16 @@ export default function Canvas({
       );
 
       // AUTO-INSERT ON LINK LOGIC
-      // Check if dropped near any existing links
-      const elementBBox = element.getBBox();
-      let targetLink: dia.Link | null = null;
-      let minDistance = Infinity;
+      const closestLink = findClosestLink(
+        currentPaper,
+        graph,
+        element.getBBox().center(),
+      );
 
-      const links = graph.getLinks();
-      for (const link of links) {
-        const linkView = currentPaper.findViewByModel(link) as dia.LinkView;
-        if (!linkView) continue;
-
-        // Find the closest point on the actual link path to the element's center
-        const center = elementBBox.center();
-
-        try {
-          const closestPoint = linkView.getClosestPoint(center);
-          if (closestPoint) {
-            // Calculate actual distance between the dropped element's center and the link's path
-            // We use a threshold of 40px (roughly half a node's height)
-            const distance = center.distance(closestPoint);
-            if (distance < 40 && distance < minDistance) {
-              minDistance = distance;
-              targetLink = link;
-            }
-          }
-        } catch (e) {
-          // Fallback if getClosestPoint throws (e.g. unrendered link)
-          console.warn("Could not calculate distance to link", e);
-        }
-      }
-
-      if (targetLink) {
-        const source = targetLink.source();
-        const target = targetLink.target();
-
-        // 1. Add the new element to the graph
+      if (closestLink) {
         graph.addCell(element);
-
-        // Dynamically find ports on the newly dropped element
-        const elementPorts = element.getPorts();
-        const elementInPort =
-          elementPorts.find((p) => p.group === "in")?.id || "in1";
-        const elementOutPort =
-          elementPorts.find((p) => p.group === "out")?.id || "out1";
-
-        // 2. Create link from original source -> new element
-        const newLink1 = new shapes.standard.Link({
-          source: source,
-          target: { id: element.id, port: elementInPort },
-          attrs: {
-            line: {
-              stroke: "#A262FF", // Default link styling
-              strokeWidth: 2,
-              targetMarker: {
-                type: "path",
-                d: "M 10 -5 0 0 10 5 Z",
-                fill: "#A262FF",
-              },
-              strokeDasharray: "0",
-            },
-          },
-          router: { name: "normal" },
-          connector: {
-            name: "jumpover",
-            args: { jump: "arc", radius: 8, size: 8 },
-          },
-        });
-
-        // 3. Create link from new element -> original target
-        const newLink2 = new shapes.standard.Link({
-          source: { id: element.id, port: elementOutPort },
-          target: target,
-          attrs: {
-            line: {
-              stroke: "#A262FF",
-              strokeWidth: 2,
-              targetMarker: {
-                type: "path",
-                d: "M 10 -5 0 0 10 5 Z",
-                fill: "#A262FF",
-              },
-              strokeDasharray: "0",
-            },
-          },
-          router: { name: "normal" },
-          connector: {
-            name: "jumpover",
-            args: { jump: "arc", radius: 8, size: 8 },
-          },
-        });
-
-        // 4. Copy routing/connection attributes if needed
-        if (targetLink.get("router"))
-          newLink1.set("router", targetLink.get("router"));
-        if (targetLink.get("connector"))
-          newLink1.set("connector", targetLink.get("connector"));
-        if (targetLink.get("router"))
-          newLink2.set("router", targetLink.get("router"));
-        if (targetLink.get("connector"))
-          newLink2.set("connector", targetLink.get("connector"));
-
-        // 5. Add new links and remove the old one (wrapped in a batch for undo)
-        graph.startBatch("auto-insert-link");
-        targetLink.remove();
-        graph.addCells([newLink1, newLink2]);
-        graph.stopBatch("auto-insert-link");
+        splitLinkWithElement(graph, closestLink, element);
       } else {
-        // Normal drop, just add the element
         graph.addCell(element);
       }
     },

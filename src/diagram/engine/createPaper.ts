@@ -11,6 +11,7 @@
  * - Default link styling and router configuration
  */
 import { dia, shapes } from '@joint/core';
+import { DEFAULT_LINK_ROUTER, DEFAULT_LINK_CONNECTOR } from './linkUtils';
 
 /** Options for paper creation */
 export interface CreatePaperOptions {
@@ -92,8 +93,8 @@ export function createPaper(options: CreatePaperOptions): dia.Paper {
                     },
                 },
                 // Apply normal routing by default
-                router: { name: 'normal' },
-                connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
+                router: DEFAULT_LINK_ROUTER,
+                connector: DEFAULT_LINK_CONNECTOR,
             }),
 
         // Validate new connections

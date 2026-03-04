@@ -17,6 +17,7 @@
  */
 import { dia, g } from '@joint/core';
 import type { UndoRedoManager } from './commandManager';
+import { findClosestLink, splitLinkWithElement } from './linkUtils';
 
 // ============================================================
 // TYPES
@@ -1400,7 +1401,13 @@ export function setupMultiSelectionMove(
 // ============================================================
 
 /**
- * Allows dropping an element onto an existing link to split it.
+ * Allows dropping an existing canvas element onto a link to split it.
+ *
+ * While dragging, the closest link (within threshold) is highlighted blue.
+ * On drop, the link is split and two new links are created through the
+ * dropped element's in/out ports.
+ *
+ * Uses shared `findClosestLink` and `splitLinkWithElement` from linkUtils.
  */
 export function setupDropOnLink(
     paper: dia.Paper,
@@ -1409,6 +1416,9 @@ export function setupDropOnLink(
 ): () => void {
     let highlightedLinkView: dia.LinkView | null = null;
     let isDragging = false;
+
+    const HIGHLIGHT_COLOR = '#2196F3';
+    const HIGHLIGHT_WIDTH = '4px';
 
     const clearHighlight = () => {
         if (highlightedLinkView) {
@@ -1426,45 +1436,28 @@ export function setupDropOnLink(
         isDragging = true;
     };
 
-    const onPointerMove = (elementView: dia.ElementView, evt: dia.Event, x: number, y: number) => {
+    const onPointerMove = (elementView: dia.ElementView) => {
         if (!isDragging) return;
 
         const element = elementView.model as dia.Element;
-        const bbox = element.getBBox();
-        const center = bbox.center();
+        const center = element.getBBox().center();
+        const closestLink = findClosestLink(paper, graph, center);
 
-        let targetLinkView: dia.LinkView | null = null;
-        let minDistance = Infinity;
+        // Resolve the view for the closest link (if any)
+        const closestView = closestLink
+            ? (paper.findViewByModel(closestLink) as dia.LinkView | null)
+            : null;
 
-        const links = graph.getLinks();
-        for (const link of links) {
-            const linkView = paper.findViewByModel(link) as dia.LinkView | null;
-            if (!linkView) continue;
-
-            try {
-                const closestPoint = linkView.getClosestPoint(center);
-                if (closestPoint) {
-                    const distance = center.distance(closestPoint);
-                    if (distance < 40 && distance < minDistance) {
-                        minDistance = distance;
-                        targetLinkView = linkView;
-                    }
-                }
-            } catch (e) {
-                // Ignore errors from unrendered links
-            }
-        }
-
-        if (targetLinkView !== highlightedLinkView) {
+        if (closestView !== highlightedLinkView) {
             clearHighlight();
-            if (targetLinkView) {
-                targetLinkView.highlight();
-                const path = targetLinkView.el.querySelector('path.line') as SVGElement;
+            if (closestView) {
+                closestView.highlight();
+                const path = closestView.el.querySelector('path.line') as SVGElement;
                 if (path) {
-                    path.style.stroke = '#2196F3'; // Blue highlight
-                    path.style.strokeWidth = '4px';
+                    path.style.stroke = HIGHLIGHT_COLOR;
+                    path.style.strokeWidth = HIGHLIGHT_WIDTH;
                 }
-                highlightedLinkView = targetLinkView;
+                highlightedLinkView = closestView;
             }
         }
     };
@@ -1475,62 +1468,11 @@ export function setupDropOnLink(
         if (highlightedLinkView) {
             const element = elementView.model as dia.Element;
             const targetLink = highlightedLinkView.model;
-            
             clearHighlight();
 
-            const source = targetLink.source();
-            const target = targetLink.target();
-
-            // Dynamically find ports
-            const elementPorts = element.getPorts();
-            const elementInPort = elementPorts.find(p => p.group === 'in')?.id || 'in1';
-            const elementOutPort = elementPorts.find(p => p.group === 'out')?.id || 'out1';
-
-            import('@joint/core').then(({ shapes }) => {
-                const newLink1 = new shapes.standard.Link({
-                    source: source,
-                    target: { id: element.id, port: elementInPort },
-                    attrs: {
-                        line: {
-                            stroke: '#A262FF',
-                            strokeWidth: 2,
-                            targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
-                            strokeDasharray: '0',
-                        },
-                    },
-                    router: { name: 'normal' },
-                    connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
-                });
-
-                const newLink2 = new shapes.standard.Link({
-                    source: { id: element.id, port: elementOutPort },
-                    target: target,
-                    attrs: {
-                        line: {
-                            stroke: '#A262FF',
-                            strokeWidth: 2,
-                            targetMarker: { type: 'path', d: 'M 10 -5 0 0 10 5 Z', fill: '#A262FF' },
-                            strokeDasharray: '0',
-                        },
-                    },
-                    router: { name: 'normal' },
-                    connector: { name: 'jumpover', args: { jump: 'arc', radius: 8, size: 8 } },
-                });
-
-                if (targetLink.get('router')) newLink1.set('router', targetLink.get('router'));
-                if (targetLink.get('connector')) newLink1.set('connector', targetLink.get('connector'));
-                if (targetLink.get('router')) newLink2.set('router', targetLink.get('router'));
-                if (targetLink.get('connector')) newLink2.set('connector', targetLink.get('connector'));
-
-                if (commandManager) commandManager.startBatch('auto-insert-link');
-                graph.startBatch('auto-insert-link');
-                
-                targetLink.remove();
-                graph.addCells([newLink1, newLink2]);
-                
-                graph.stopBatch('auto-insert-link');
-                if (commandManager) commandManager.stopBatch();
-            });
+            if (commandManager) commandManager.startBatch('auto-insert-link');
+            splitLinkWithElement(graph, targetLink, element);
+            if (commandManager) commandManager.stopBatch();
         }
     };
 
@@ -1545,3 +1487,4 @@ export function setupDropOnLink(
         clearHighlight();
     };
 }
+
