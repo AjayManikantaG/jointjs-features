@@ -30,6 +30,7 @@ import {
   setupResizeRotate,
   highlightCells,
   type ContextMenuEvent,
+  type LinkContextMenuEvent,
   type TooltipEvent,
   setupMultiSelectionMove,
   setupDropOnLink,
@@ -64,6 +65,7 @@ const PaperWrapper = styled.div`
 
 interface CanvasProps {
   onContextMenu?: (event: ContextMenuEvent) => void;
+  onLinkContextMenu?: (event: LinkContextMenuEvent) => void;
   onTooltipShow?: (event: TooltipEvent) => void;
   onTooltipHide?: () => void;
   onConfigure?: (cell: dia.Cell) => void;
@@ -71,6 +73,7 @@ interface CanvasProps {
 
 export default function Canvas({
   onContextMenu,
+  onLinkContextMenu,
   onTooltipShow,
   onTooltipHide,
   onConfigure,

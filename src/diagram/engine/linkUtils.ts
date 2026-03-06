@@ -30,7 +30,7 @@ export const DEFAULT_LINK_ATTRS = {
 } as const;
 
 /** Default router applied to new links */
-export const DEFAULT_LINK_ROUTER = { name: 'normal' } as const;
+export const DEFAULT_LINK_ROUTER = { name: 'manhattan' } as const;
 
 /** Default connector applied to new links */
 export const DEFAULT_LINK_CONNECTOR = {

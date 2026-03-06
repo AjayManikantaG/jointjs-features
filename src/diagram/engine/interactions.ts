@@ -438,27 +438,67 @@ export function setupDoubleClickSettings(
 // CONTEXT MENU
 // ============================================================
 
+/** Context menu event data for links */
+export interface LinkContextMenuEvent {
+    position: Position;
+    link: dia.Link;
+    linkView: dia.LinkView;
+}
+
 /**
  * Sets up right-click context menu dispatching.
  * Prevents default browser menu and calls the callback with event data.
- * 
+ *
+ * - Right-click on an element → onContextMenu (element menu)
+ * - Right-click on a link    → onLinkContextMenu (link-specific menu)
+ * - Right-click on blank      → onContextMenu (blank canvas menu)
+ *
  * @param paper The dia.Paper instance
- * @param onContextMenu Callback with context menu data
+ * @param onContextMenu Callback with element/blank context menu data
+ * @param onLinkContextMenu Optional callback for link-specific context menu
  * @returns Cleanup function
  */
 export function setupContextMenu(
     paper: dia.Paper,
     onContextMenu: (event: ContextMenuEvent) => void,
+    onLinkContextMenu?: (event: LinkContextMenuEvent) => void,
 ): () => void {
     const el = paper.el as HTMLElement;
+
+    // Track whether a link context menu was just handled, so the native
+    // contextmenu handler can skip re-firing for the same right-click.
+    let linkContextHandled = false;
+
+    // JointJS fires link:contextmenu before the native DOM contextmenu event.
+    const onLinkContextMenuEvent = (
+        linkView: dia.LinkView,
+        evt: dia.Event,
+    ) => {
+        const originalEvent = evt.originalEvent as MouseEvent;
+        originalEvent.preventDefault();
+        originalEvent.stopPropagation();
+        linkContextHandled = true;
+
+        onLinkContextMenu?.({
+            position: { x: originalEvent.clientX, y: originalEvent.clientY },
+            link: linkView.model,
+            linkView,
+        });
+    };
 
     const onContextMenuEvent = (e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
 
+        // If a link context menu was just dispatched via JointJS event, skip.
+        if (linkContextHandled) {
+            linkContextHandled = false;
+            return;
+        }
+
         const localPoint = paper.clientToLocalPoint({ x: e.clientX, y: e.clientY });
 
-        // Find what's under the cursor
+        // Find what's under the cursor (elements only)
         const views = paper.findViewsFromPoint(localPoint);
         const cellView = views.length > 0 ? views[0] : null;
         const cell = cellView ? cellView.model : null;
@@ -470,9 +510,11 @@ export function setupContextMenu(
         });
     };
 
+    paper.on('link:contextmenu', onLinkContextMenuEvent);
     el.addEventListener('contextmenu', onContextMenuEvent);
 
     return () => {
+        paper.off('link:contextmenu', onLinkContextMenuEvent);
         el.removeEventListener('contextmenu', onContextMenuEvent);
     };
 }
