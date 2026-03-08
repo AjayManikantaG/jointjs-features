@@ -35,6 +35,13 @@ export const GlobalStyles = createGlobalStyle`
   }
 
   /* ========== SCROLLBAR ========== */
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: ${theme.colors.border.default} transparent;
+  }
+
+  /* WebKit (Chrome, Safari, Edge) */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -45,6 +52,7 @@ export const GlobalStyles = createGlobalStyle`
   ::-webkit-scrollbar-thumb {
     background: ${theme.colors.border.default};
     border-radius: ${theme.radius.pill};
+    transition: background 0.2s ease;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: ${theme.colors.border.strong};

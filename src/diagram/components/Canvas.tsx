@@ -100,6 +100,7 @@ export default function Canvas({
 
   // Stable references for callbacks
   const onContextMenuRef = useRef(onContextMenu);
+  const onLinkContextMenuRef = useRef(onLinkContextMenu);
   const onTooltipShowRef = useRef(onTooltipShow);
   const onTooltipHideRef = useRef(onTooltipHide);
   const onConfigureRef = useRef(onConfigure);
@@ -111,6 +112,7 @@ export default function Canvas({
   doubleClickModeRef.current = doubleClickMode;
 
   onContextMenuRef.current = onContextMenu;
+  onLinkContextMenuRef.current = onLinkContextMenu;
   onTooltipShowRef.current = onTooltipShow;
   onTooltipHideRef.current = onTooltipHide;
   onConfigureRef.current = onConfigure;
@@ -186,9 +188,15 @@ export default function Canvas({
 
     // 4. Context menu
     cleanups.push(
-      setupContextMenu(newPaper, (event) => {
-        onContextMenuRef.current?.(event);
-      }),
+      setupContextMenu(
+        newPaper,
+        (event) => {
+          onContextMenuRef.current?.(event);
+        },
+        (event) => {
+          onLinkContextMenuRef.current?.(event);
+        },
+      ),
     );
 
     // 5. Tooltips
@@ -383,18 +391,14 @@ export default function Canvas({
       graph.off("change:size", onChildMove);
     });
 
-    // 13. Configuration Modal listener
-    newPaper.on(
-      "element:configure",
-      (elementView: dia.ElementView | dia.Element) => {
-        // It might pass the element directly depending on how we triggered it
-        const cell =
-          elementView instanceof dia.Element ? elementView : elementView.model;
-        if (onConfigureRef.current) {
-          onConfigureRef.current(cell);
-        }
-      },
-    );
+    // 13. Configuration Modal listener (handles both elements and links)
+    newPaper.on("element:configure", (cellOrView: dia.CellView | dia.Cell) => {
+      const cell =
+        cellOrView instanceof dia.Cell ? cellOrView : cellOrView.model;
+      if (onConfigureRef.current) {
+        onConfigureRef.current(cell);
+      }
+    });
 
     // Center the paper view
     const containerRect = container.getBoundingClientRect();
@@ -480,6 +484,7 @@ export default function Canvas({
       onDrop={onDrop}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <PaperWrapper ref={paperContainerRef} />
     </CanvasContainer>

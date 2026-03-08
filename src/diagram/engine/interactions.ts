@@ -418,15 +418,25 @@ export function setupDoubleClickSettings(
         }
     };
 
+    // Double-click on a link opens the configure modal
+    const onLinkDblClick = (linkView: dia.LinkView) => {
+        const link = linkView.model;
+        if (link) {
+            paper.trigger('element:configure', link);
+        }
+    };
+
     const onBlankClick = () => {
         if (activeEditor) commitEdit();
     };
 
     paper.on('element:pointerdblclick', onElementDblClick);
+    paper.on('link:pointerdblclick', onLinkDblClick);
     paper.on('blank:pointerclick', onBlankClick);
 
     return () => {
         paper.off('element:pointerdblclick', onElementDblClick);
+        paper.off('link:pointerdblclick', onLinkDblClick);
         paper.off('blank:pointerclick', onBlankClick);
         removeEditor();
     };
@@ -510,11 +520,33 @@ export function setupContextMenu(
         });
     };
 
+    // Single left-click on a link also opens the link context menu
+    const onLinkPointerClick = (
+        linkView: dia.LinkView,
+        evt: dia.Event,
+    ) => {
+        const originalEvent = evt.originalEvent as MouseEvent;
+
+        onLinkContextMenu?.({
+            position: { x: originalEvent.clientX, y: originalEvent.clientY },
+            link: linkView.model,
+            linkView,
+        });
+    };
+
+    // Always block the native browser context menu on the paper (capture phase
+    // fires first, before any JointJS handler can stopPropagation).
+    const blockNativeMenu = (e: MouseEvent) => e.preventDefault();
+    el.addEventListener('contextmenu', blockNativeMenu, true);
+
     paper.on('link:contextmenu', onLinkContextMenuEvent);
+    paper.on('link:pointerclick', onLinkPointerClick);
     el.addEventListener('contextmenu', onContextMenuEvent);
 
     return () => {
+        el.removeEventListener('contextmenu', blockNativeMenu, true);
         paper.off('link:contextmenu', onLinkContextMenuEvent);
+        paper.off('link:pointerclick', onLinkPointerClick);
         el.removeEventListener('contextmenu', onContextMenuEvent);
     };
 }
